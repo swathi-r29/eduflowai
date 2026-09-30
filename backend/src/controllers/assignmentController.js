@@ -8,45 +8,44 @@ export function classifyAssignmentType({ question = '', sampleSolution = '', tit
   const sampleLower = (sampleSolution || '').toLowerCase();
   const questionLower = (question || '').toLowerCase();
 
-  // 1. Check for explicit programming code syntax or instructions
-  const hasCodeSyntax = /def\s+[a-zA-Z0-9_]+\s*\(/.test(sampleSolution + ' ' + question) ||
-                        sampleLower.includes('return ') ||
-                        sampleLower.includes('def ') ||
-                        sampleLower.includes('class ') ||
-                        sampleLower.includes('import ') ||
-                        sampleLower.includes('print(') ||
-                        sampleLower.includes('system.out.print') ||
-                        questionLower.includes('write a python function') ||
-                        questionLower.includes('write a function') ||
-                        questionLower.includes('write a program') ||
-                        questionLower.includes('write code') ||
-                        questionLower.includes('function called') ||
-                        questionLower.includes('implement a function') ||
-                        questionLower.includes('implement a method') ||
-                        questionLower.includes('find_top_students');
+  const hasCodeSyntax =
+    /def\s+[a-zA-Z0-9_]+\s*\(/.test(sampleSolution + ' ' + question) ||
+    sampleLower.includes('return ') ||
+    sampleLower.includes('def ') ||
+    sampleLower.includes('class ') ||
+    sampleLower.includes('import ') ||
+    sampleLower.includes('print(') ||
+    sampleLower.includes('system.out.print') ||
+    questionLower.includes('write a python function') ||
+    questionLower.includes('write a function') ||
+    questionLower.includes('write a program') ||
+    questionLower.includes('write code') ||
+    questionLower.includes('function called') ||
+    questionLower.includes('implement a function') ||
+    questionLower.includes('implement a method') ||
+    questionLower.includes('find_top_students');
 
   if (hasCodeSyntax) {
     return 'PROGRAMMING';
   }
 
-  // 2. Respect explicit evaluationType if provided by user/admin
   if (evaluationType && ['PROGRAMMING', 'THEORY', 'ESSAY', 'MIXED'].includes(evaluationType)) {
     return evaluationType;
   }
 
-  // 3. Theory / Essay indicators
-  const isTheoryTask = text.includes('explain') || 
-                       text.includes('describe') || 
-                       text.includes('compare') || 
-                       text.includes('discuss') || 
-                       text.includes('differs from') || 
-                       text.includes('what is');
+  const isTheoryTask =
+    text.includes('explain') ||
+    text.includes('describe') ||
+    text.includes('compare') ||
+    text.includes('discuss') ||
+    text.includes('differs from') ||
+    text.includes('what is');
 
   if (isTheoryTask) {
     return 'THEORY';
   }
 
-  return 'THEORY'; // Default safe fallback
+  return 'THEORY';
 }
 
 export const createAssignment = asyncHandler(async (req, res) => {
@@ -95,4 +94,41 @@ export const getAssignment = asyncHandler(async (req, res) => {
   const assignment = await Assignment.findById(req.params.id);
   if (!assignment) throw new ApiError(404, 'Assignment not found');
   res.json({ assignment });
+});
+
+/**
+ * Save 1-3 teacher-graded calibration ground truth examples
+ * POST /api/assignments/:id/calibrate
+ */
+export const saveCalibrationExamples = asyncHandler(async (req, res) => {
+  const { examples } = req.body;
+  if (!Array.isArray(examples)) {
+    throw new ApiError(400, 'examples must be an array of graded submissions');
+  }
+
+  const assignment = await Assignment.findById(req.params.id);
+  if (!assignment) throw new ApiError(404, 'Assignment not found');
+
+  if (req.user.role !== 'admin' && String(assignment.teacher) !== String(req.user._id)) {
+    throw new ApiError(403, 'Forbidden: Only the assignment instructor can configure calibration');
+  }
+
+  // Format and retain up to 3 examples
+  assignment.calibrationExamples = examples.slice(0, 3).map((ex) => ({
+    submissionText: ex.submissionText || '',
+    totalScore: Number(ex.totalScore) || 0,
+    teacherNotes: ex.teacherNotes || '',
+    criteriaScores: (ex.criteriaScores || []).map((cs) => ({
+      criterion: cs.criterion,
+      score: Number(cs.score) || 0,
+      reasoning: cs.reasoning || ''
+    }))
+  }));
+
+  await assignment.save();
+
+  res.json({
+    message: 'Calibration examples saved successfully',
+    calibrationExamples: assignment.calibrationExamples
+  });
 });

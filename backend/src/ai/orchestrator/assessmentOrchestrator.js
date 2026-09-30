@@ -16,31 +16,13 @@ import StudentKnowledgeProfile from '../../models/StudentKnowledgeProfile.js';
 import StudyWorkspace from '../../models/StudyWorkspace.js';
 import { search } from '../retrieval/vectorStore.js';
 
-/**
- * Deterministic + LLM AI Multi-Agent Assessment Pipeline:
- *
- * Submission
- *   ↓
- * Submission Understanding
- *   ↓
- * Requirement-Aware Test Generation (for PROGRAMMING tasks)
- *   ↓
- * Isolated Code Execution Sandbox (for PROGRAMMING tasks)
- *   ↓
- * Rubric Evaluation Agent (bounded strictly by test execution evidence when applicable)
- *   ↓
- * Root Cause Misconception Diagnosis
- *   ↓
- * Personalized LLM Feedback
- *   ↓
- * Final Bounded Score & Detailed Evidence
- */
 export async function runAssessmentPipeline({ submission, assignment }) {
   const submissionText = submission.answerText || '';
   const question = assignment.question || '';
   const sampleSolution = assignment.sampleSolution || '';
   const rubric = assignment.rubric || [];
   const maxScore = assignment.maxScore || 100;
+  const calibrationExamples = assignment.calibrationExamples || [];
   const evaluationType = classifyAssignmentType({
     question,
     sampleSolution,
@@ -60,10 +42,6 @@ export async function runAssessmentPipeline({ submission, assignment }) {
   } catch (err) {
     const textLower = submissionText.toLowerCase();
     const expectedConcepts = rubric.map((r) => r.criterion || 'Core Concept');
-    const hasDef = textLower.includes('def ');
-    const hasLoop = textLower.includes('for ') || textLower.includes(' in ');
-    const hasComparison = textLower.includes('>=') || textLower.includes('>') || textLower.includes('if ');
-    const hasSorting = textLower.includes('sort');
 
     understanding = {
       understoodTask: textLower.length > 10,
@@ -75,7 +53,7 @@ export async function runAssessmentPipeline({ submission, assignment }) {
     };
   }
 
-  // 2. Requirement-Aware Test Case Generation (ONLY for PROGRAMMING assignments)
+  // 2. Requirement-Aware Test Generation (PROGRAMMING assignments only)
   let testSuite = { applicable: false, functionName: null, testCases: [] };
   if (evaluationType === 'PROGRAMMING') {
     try {
@@ -86,22 +64,18 @@ export async function runAssessmentPipeline({ submission, assignment }) {
         evaluationType
       });
     } catch (e) {
-      testSuite = {
-        applicable: false,
-        functionName: null,
-        testCases: []
-      };
+      testSuite = { applicable: false, functionName: null, testCases: [] };
     }
   }
 
-  // 3. Isolated Code Execution Sandbox (ONLY for PROGRAMMING assignments with test cases)
+  // 3. Isolated Code Execution Sandbox
   let executionResults = {
     applicable: false,
     status: 'NOT_APPLICABLE',
     reason: evaluationType === 'THEORY' ? 'Theory assignment' : 'Execution not required'
   };
 
-  if (evaluationType === 'PROGRAMMING' && testSuite && testSuite.applicable && Array.isArray(testSuite.testCases) && testSuite.testCases.length > 0) {
+  if (evaluationType === 'PROGRAMMING' && testSuite?.applicable && Array.isArray(testSuite.testCases) && testSuite.testCases.length > 0) {
     try {
       executionResults = await executePythonCode({
         code: submissionText,
@@ -118,12 +92,13 @@ export async function runAssessmentPipeline({ submission, assignment }) {
         failedTests: testSuite.testCases.length,
         status: 'error',
         error: e.message,
-        tests: []
+        tests: [],
+        failedTestsList: []
       };
     }
   }
 
-  // 4. Rubric Evaluation Agent (Uses Execution Results as Primary Ground Truth for PROGRAMMING tasks)
+  // 4. Rubric Evaluation Agent (passes calibration examples and consumes confidence scoring)
   let rubricEvaluation;
   try {
     rubricEvaluation = await runRubricEvaluationAgent({
@@ -133,7 +108,8 @@ export async function runAssessmentPipeline({ submission, assignment }) {
       submissionText,
       understanding,
       executionResults,
-      evaluationType
+      evaluationType,
+      calibrationExamples
     });
   } catch (err) {
     const isTheory = evaluationType === 'THEORY' || evaluationType === 'ESSAY';
@@ -141,17 +117,22 @@ export async function runAssessmentPipeline({ submission, assignment }) {
     rubricEvaluation = {
       totalScore: Math.floor(maxScore * defaultPct),
       maxScore,
+      overallConfidence: 0.60,
+      requiresTeacherReview: true,
+      reviewReason: 'Rubric evaluation agent failure; rule fallback applied.',
       criteriaScores: rubric.map((r, idx) => ({
         criterion: r.criterion,
         score: Math.floor(r.maxPoints * defaultPct),
         maxPoints: r.maxPoints,
+        confidence: 0.60,
+        confidenceReason: 'Fallback scoring used due to agent error.',
         reasoning: isTheory ? 'Evaluated against theory criteria.' : (executionResults?.passed ? 'Passed all test assertions.' : 'Failed 1 or more test assertions.'),
         evidence: submissionText.split(/\n+/)[idx] || submissionText.slice(0, 100)
       }))
     };
   }
 
-  // 5. Root Cause Agent (Diagnoses misconception based on failed test evidence)
+  // 5. Root Cause Misconception Diagnosis
   let rootCause;
   try {
     rootCause = await runRootCauseAgent({
@@ -172,11 +153,11 @@ export async function runAssessmentPipeline({ submission, assignment }) {
       expectedConcept: 'Inclusive boundary handling (>=)',
       studentInterpretation: 'Exclusive comparison',
       rootReason: hasFailures ? 'Failed exact boundary condition test.' : 'All tests passed.',
-      confidence: 0.94
+      confidence: 0.85
     };
   }
 
-  // 6. Feedback Agent (Generates evidence-grounded feedback)
+  // 6. Feedback Agent
   let feedback;
   try {
     feedback = await runFeedbackAgent({
@@ -205,27 +186,28 @@ export async function runAssessmentPipeline({ submission, assignment }) {
       const queryStr = `${rootCause.detectedMisconception} ${rootCause.expectedConcept || ''}`;
       for (const ws of workspaces) {
         const searchRes = await search({ workspaceId: ws._id, query: queryStr, topK: 3 });
-        if (searchRes.length > 0 && searchRes[0].score > bestScore) {
+        if (searchRes.length > 0 && (searchRes[0].score || 0) > bestScore) {
           bestScore = searchRes[0].score;
           bestMatch = { ...searchRes[0], workspaceId: ws._id };
         }
       }
-      if (bestMatch && bestScore > 0.2) {
+      if (bestMatch && bestScore > 0.02) {
+        const chunkData = bestMatch.chunk || bestMatch;
         recommendedResource = {
-          sourceType: bestMatch.chunk.sourceType,
-          sourceId: String(bestMatch.chunk.sourceId),
-          sourceName: bestMatch.chunk.sourceName,
+          sourceType: chunkData.sourceType,
+          sourceId: chunkData.sourceId ? String(chunkData.sourceId) : null,
+          sourceName: chunkData.sourceName || '',
           workspaceId: String(bestMatch.workspaceId),
-          startTime: bestMatch.chunk.startTime,
-          endTime: bestMatch.chunk.endTime,
-          page: bestMatch.chunk.page,
-          snippet: bestMatch.chunk.text?.slice(0, 300)
+          startTime: chunkData.startTime,
+          endTime: chunkData.endTime,
+          page: chunkData.page,
+          snippet: chunkData.text?.slice(0, 300)
         };
       }
     } catch (e) {}
   }
 
-  // Static Analysis Evidence
+  // Static Analysis
   const textLower = submissionText.toLowerCase();
   const staticAnalysis = {
     applicable: evaluationType === 'PROGRAMMING',
@@ -239,55 +221,52 @@ export async function runAssessmentPipeline({ submission, assignment }) {
     hasReturn: textLower.includes('return')
   };
 
-  // AI Analysis Metrics
+  // Resolve Final Confidence and Review Routing
+  const finalConfidence = typeof rubricEvaluation.overallConfidence === 'number'
+    ? rubricEvaluation.overallConfidence
+    : (rootCause.confidence || 0.85);
+
+  const requiresTeacherReview = rubricEvaluation.requiresTeacherReview === true || finalConfidence < 0.70;
+  const reviewReason = requiresTeacherReview
+    ? (rubricEvaluation.reviewReason || `Overall confidence score of ${finalConfidence} is below the 0.70 threshold.`)
+    : null;
+  const status = requiresTeacherReview ? 'needs_review' : 'published';
+
   const aiAnalysis = {
-    confidence: rootCause.confidence || 0.94,
+    confidence: finalConfidence,
     rootCause: rootCause.detectedMisconception,
     feedback: feedback.explanation
   };
 
   const failedTests = executionResults?.failedTestsList || [];
 
-  // Save structured GradingResult to DB
+  // Persist GradingResult to DB
+  const gradingData = {
+    submission: submission._id,
+    assignment: assignment._id,
+    student: submission.student,
+    understanding,
+    executionResults,
+    failedTests,
+    staticAnalysis,
+    aiAnalysis,
+    rubricEvaluation,
+    rootCause,
+    feedback,
+    recommendedResource,
+    aiScore: rubricEvaluation.totalScore,
+    aiMaxScore: maxScore,
+    aiConfidence: finalConfidence,
+    requiresTeacherReview,
+    reviewReason,
+    status
+  };
+
   let gradingResult;
   try {
-    gradingResult = await GradingResult.create({
-      submission: submission._id,
-      assignment: assignment._id,
-      student: submission.student,
-      understanding,
-      executionResults,
-      failedTests,
-      staticAnalysis,
-      aiAnalysis,
-      rubricEvaluation,
-      rootCause,
-      feedback,
-      recommendedResource,
-      aiScore: rubricEvaluation.totalScore,
-      aiMaxScore: maxScore,
-      aiConfidence: rootCause.confidence || 0.94
-    });
+    gradingResult = await GradingResult.create(gradingData);
   } catch (err) {
-    // In unit testing environment (DB offline), return unpersisted object
-    gradingResult = {
-      _id: 'mock_grading_result_id',
-      submission: submission._id,
-      assignment: assignment._id,
-      student: submission.student,
-      understanding,
-      executionResults,
-      failedTests,
-      staticAnalysis,
-      aiAnalysis,
-      rubricEvaluation,
-      rootCause,
-      feedback,
-      recommendedResource,
-      aiScore: rubricEvaluation.totalScore,
-      aiMaxScore: maxScore,
-      aiConfidence: rootCause.confidence || 0.94
-    };
+    gradingResult = { _id: 'mock_grading_result_id', ...gradingData };
   }
 
   // Targeted remediation quiz
@@ -310,15 +289,17 @@ export async function runAssessmentPipeline({ submission, assignment }) {
     } catch (qErr) {
       const fallbackQuestions = [
         {
-          question: `Why is >= used instead of > when filtering scores with a lower bound threshold?`,
+          question: 'Why is >= used instead of > when filtering scores with a lower bound threshold?',
           options: [
-            `Because >= includes student scores that match the exact threshold value`,
-            `Because > includes lower scores`,
-            `Because >= sorts the list automatically`,
-            `None of the above`
+            'Because >= includes student scores that match the exact threshold value',
+            'Because > includes lower scores',
+            'Because >= sorts the list automatically',
+            'None of the above'
           ],
           correctAnswerIndex: 0,
-          explanation: `The >= operator ensures inclusive filtering so exact threshold scores are preserved.`
+          explanation: 'The >= operator ensures inclusive filtering so exact threshold scores are preserved.',
+          difficulty: 'medium',
+          targetConcept
         }
       ];
       try {
@@ -335,7 +316,7 @@ export async function runAssessmentPipeline({ submission, assignment }) {
     }
   }
 
-  // Step 3: Concept Tally & At-Risk Flagging (Threshold: 2) & Step 4: AI Revision Blueprint
+  // Concept Tally & At-Risk Flagging
   let revisionPlan = null;
   try {
     const isMastery = (rubricEvaluation.totalScore / maxScore) >= 0.85;
@@ -353,7 +334,13 @@ export async function runAssessmentPipeline({ submission, assignment }) {
       weakConcepts.forEach((weakC) => {
         let existing = profile.concepts.find((c) => c.concept.toLowerCase() === weakC.toLowerCase());
         if (!existing) {
-          existing = { concept: weakC, masteryScore: isMastery ? 90 : 50, confidence: 0.8, attempts: 1, commonErrors: [rootCause.detectedMisconception] };
+          existing = {
+            concept: weakC,
+            masteryScore: isMastery ? 90 : 50,
+            confidence: 0.8,
+            attempts: 1,
+            commonErrors: [rootCause.detectedMisconception]
+          };
           profile.concepts.push(existing);
         } else {
           existing.attempts += 1;
@@ -374,7 +361,6 @@ export async function runAssessmentPipeline({ submission, assignment }) {
 
       await profile.save();
 
-      // Step 4: Root-Cause Revision Blueprint if at-risk or low score
       if (atRisk || !isMastery) {
         const blueprint = await generateRevisionPlan({
           assignmentTitle: assignment.title || 'Assignment',

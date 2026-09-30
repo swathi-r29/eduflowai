@@ -1,10 +1,16 @@
+import { v4 as uuidv4 } from 'uuid';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import DocumentModel from '../models/DocumentModel.js';
 import StudyWorkspace from '../models/StudyWorkspace.js';
 import { processDocument } from '../ai/orchestrator/studyOrchestrator.js';
-import { enqueue, getJobStatus } from '../jobs/jobQueue.js';
-import { v4 as uuidv4 } from 'uuid';
+import { enqueue, getJobStatus, registerTaskHandler } from '../jobs/jobQueue.js';
+
+// Register BullMQ task handler
+export const TASK_PROCESS_DOCUMENT = 'PROCESS_DOCUMENT';
+registerTaskHandler(TASK_PROCESS_DOCUMENT, async ({ documentId }) => {
+  return await processDocument(documentId);
+});
 
 export const uploadDocument = asyncHandler(async (req, res) => {
   const { workspaceId } = req.body;
@@ -13,14 +19,20 @@ export const uploadDocument = asyncHandler(async (req, res) => {
   if (!workspace) throw new ApiError(404, 'Workspace not found');
 
   const doc = await DocumentModel.create({
-    workspace: workspaceId, owner: req.user._id, originalName: req.file.originalname,
-    storedPath: req.file.path, mimeType: req.file.mimetype, status: 'uploaded'
+    workspace: workspaceId,
+    owner: req.user._id,
+    originalName: req.file.originalname,
+    storedPath: req.file.path,
+    mimeType: req.file.mimetype,
+    status: 'uploaded'
   });
+
   workspace.documents.push(doc._id);
   await workspace.save();
 
   const jobId = uuidv4();
-  enqueue(jobId, () => processDocument(doc._id));
+  await enqueue(jobId, TASK_PROCESS_DOCUMENT, { documentId: String(doc._id) });
+
   res.status(202).json({ document: doc, jobId });
 });
 
@@ -31,5 +43,6 @@ export const getDocument = asyncHandler(async (req, res) => {
 });
 
 export const getJob = asyncHandler(async (req, res) => {
-  res.json(getJobStatus(req.params.jobId));
+  const status = await getJobStatus(req.params.jobId);
+  res.json(status);
 });

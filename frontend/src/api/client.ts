@@ -13,9 +13,11 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('eduflow_token');
-      localStorage.removeItem('eduflow_user');
-      window.location.href = '/login';
     }
     return Promise.reject(err);
   }
 );
+
+export default api;
+
+

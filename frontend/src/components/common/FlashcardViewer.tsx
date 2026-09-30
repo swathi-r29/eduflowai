@@ -1,26 +1,33 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RotateCw, ChevronLeft, ChevronRight, Shuffle, Sparkles, CheckCircle } from 'lucide-react';
+import { RotateCw, ChevronLeft, ChevronRight, Sparkles, Clock } from 'lucide-react';
+import { api } from '../../api/client';
 
 export interface Flashcard {
   id?: string | number;
+  _id?: string;
   front: string;
   back: string;
   concept?: string;
+  interval?: number;
+  repetition?: number;
+  dueDate?: string;
 }
 
 interface FlashcardViewerProps {
+  workspaceId?: string;
   cards: Flashcard[];
   onRegenerate?: () => void;
   isGenerating?: boolean;
 }
 
-export default function FlashcardViewer({ cards, onRegenerate, isGenerating }: FlashcardViewerProps) {
+export default function FlashcardViewer({ workspaceId, cards, onRegenerate, isGenerating }: FlashcardViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
-  const [knownCards, setKnownCards] = useState<Set<number>>(new Set());
+  const [cardList, setCardList] = useState<Flashcard[]>(cards);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!cards || cards.length === 0) {
+  if (!cardList || cardList.length === 0) {
     return (
       <div className="card text-center py-8">
         <p className="text-slate-400 text-sm mb-3">No flashcards available yet.</p>
@@ -33,29 +40,46 @@ export default function FlashcardViewer({ cards, onRegenerate, isGenerating }: F
     );
   }
 
-  const currentCard = cards[currentIndex] || cards[0];
+  const currentCard = cardList[currentIndex] || cardList[0];
 
   const handleNext = () => {
     setIsFlipped(false);
-    setCurrentIndex((prev) => (prev + 1) % cards.length);
+    setCurrentIndex((prev) => (prev + 1) % cardList.length);
   };
 
   const handlePrev = () => {
     setIsFlipped(false);
-    setCurrentIndex((prev) => (prev - 1 + cards.length) % cards.length);
+    setCurrentIndex((prev) => (prev - 1 + cardList.length) % cardList.length);
   };
 
-  const toggleMastered = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setKnownCards((prev) => {
-      const next = new Set(prev);
-      if (next.has(currentIndex)) {
-        next.delete(currentIndex);
-      } else {
-        next.add(currentIndex);
-      }
-      return next;
-    });
+  // Submit SuperMemo-2 Quality Score (1 = Again, 3 = Hard, 4 = Good, 5 = Easy)
+  const handleSM2Rating = async (quality: number) => {
+    if (!workspaceId || (!currentCard._id && !currentCard.id)) {
+      handleNext();
+      return;
+    }
+
+    const cardId = currentCard._id || currentCard.id;
+    setIsSubmitting(true);
+    try {
+      const res = await api.post('/study/flashcard-review', {
+        workspaceId,
+        cardId,
+        quality
+      });
+
+      // Update card in local state with returned interval
+      setCardList((prev) =>
+        prev.map((c, idx) =>
+          idx === currentIndex ? { ...c, interval: res.data?.card?.interval, repetition: res.data?.card?.repetition } : c
+        )
+      );
+    } catch (e) {
+      console.error('Failed to submit SM-2 card rating:', e);
+    } finally {
+      setIsSubmitting(false);
+      handleNext();
+    }
   };
 
   return (
@@ -63,13 +87,15 @@ export default function FlashcardViewer({ cards, onRegenerate, isGenerating }: F
       <div className="flex justify-between items-center text-sm border-b border-base-700 pb-3">
         <div className="flex items-center gap-2 font-medium">
           <Sparkles className="text-brand-indigo" size={18} />
-          <span>Interactive Flashcards</span>
+          <span>Interactive Spaced Repetition Flashcards</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
-          <span>Card {currentIndex + 1} of {cards.length}</span>
-          <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-mono">
-            {knownCards.size}/{cards.length} Mastered
-          </span>
+          <span>Card {currentIndex + 1} of {cardList.length}</span>
+          {currentCard.interval !== undefined && currentCard.interval > 0 && (
+            <span className="flex items-center gap-1 bg-brand-indigo/10 text-brand-indigo px-2 py-0.5 rounded font-mono">
+              <Clock size={12} /> Interval: {currentCard.interval}d
+            </span>
+          )}
         </div>
       </div>
 
@@ -92,18 +118,6 @@ export default function FlashcardViewer({ cards, onRegenerate, isGenerating }: F
               <span className={`text-xs px-2.5 py-1 rounded font-semibold uppercase tracking-wider ${isFlipped ? 'bg-brand-indigo/30 text-indigo-300' : 'bg-base-700 text-slate-300'}`}>
                 {isFlipped ? 'Answer / Explanation' : 'Question / Concept'}
               </span>
-              <button
-                type="button"
-                onClick={toggleMastered}
-                className={`text-xs flex items-center gap-1.5 px-2 py-1 rounded transition-colors ${
-                  knownCards.has(currentIndex)
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : 'bg-base-700/50 text-slate-400 hover:text-white'
-                }`}
-              >
-                <CheckCircle size={14} />
-                {knownCards.has(currentIndex) ? 'Mastered' : 'Mark Mastered'}
-              </button>
             </div>
 
             <div className="my-auto py-4 text-center">
@@ -124,25 +138,62 @@ export default function FlashcardViewer({ cards, onRegenerate, isGenerating }: F
         </AnimatePresence>
       </div>
 
-      {/* Navigation Controls */}
-      <div className="flex items-center justify-between pt-2">
-        <button className="btn-secondary text-xs flex items-center gap-1" onClick={handlePrev}>
-          <ChevronLeft size={16} /> Previous
-        </button>
-
-        <div className="flex gap-2">
-          {onRegenerate && (
-            <button className="btn-secondary text-xs flex items-center gap-1" onClick={onRegenerate} disabled={isGenerating}>
-              <RotateCw size={14} className={isGenerating ? 'animate-spin' : ''} />
-              {isGenerating ? 'Regenerating...' : 'Regenerate'}
+      {/* SM-2 Recall Rating Controls (Visible after flipped) */}
+      {isFlipped ? (
+        <div className="space-y-2 pt-2">
+          <p className="text-xs text-center text-slate-400">How well did you know this concept?</p>
+          <div className="grid grid-cols-4 gap-2">
+            <button
+              onClick={() => handleSM2Rating(1)}
+              disabled={isSubmitting}
+              className="btn-secondary text-xs border-red-500/40 text-red-300 hover:bg-red-500/20 py-2 rounded"
+            >
+              Again (1d)
             </button>
-          )}
+            <button
+              onClick={() => handleSM2Rating(3)}
+              disabled={isSubmitting}
+              className="btn-secondary text-xs border-amber-500/40 text-amber-300 hover:bg-amber-500/20 py-2 rounded"
+            >
+              Hard ({Math.max(1, Math.round((currentCard.interval || 1) * 1.2))}d)
+            </button>
+            <button
+              onClick={() => handleSM2Rating(4)}
+              disabled={isSubmitting}
+              className="btn-secondary text-xs border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20 py-2 rounded"
+            >
+              Good ({Math.max(1, Math.round((currentCard.interval || 1) * (currentCard.repetition ? 2.5 : 1)))}d)
+            </button>
+            <button
+              onClick={() => handleSM2Rating(5)}
+              disabled={isSubmitting}
+              className="btn-primary text-xs bg-brand-indigo hover:bg-brand-indigo/80 py-2 rounded"
+            >
+              Easy ({Math.max(2, Math.round((currentCard.interval || 1) * 3))}d)
+            </button>
+          </div>
         </div>
+      ) : (
+        /* Navigation Controls */
+        <div className="flex items-center justify-between pt-2">
+          <button className="btn-secondary text-xs flex items-center gap-1" onClick={handlePrev}>
+            <ChevronLeft size={16} /> Previous
+          </button>
 
-        <button className="btn-primary text-xs flex items-center gap-1" onClick={handleNext}>
-          Next <ChevronRight size={16} />
-        </button>
-      </div>
+          <div className="flex gap-2">
+            {onRegenerate && (
+              <button className="btn-secondary text-xs flex items-center gap-1" onClick={onRegenerate} disabled={isGenerating}>
+                <RotateCw size={14} className={isGenerating ? 'animate-spin' : ''} />
+                {isGenerating ? 'Regenerating...' : 'Regenerate'}
+              </button>
+            )}
+          </div>
+
+          <button className="btn-primary text-xs flex items-center gap-1" onClick={handleNext}>
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

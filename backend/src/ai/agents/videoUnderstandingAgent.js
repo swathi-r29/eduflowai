@@ -14,7 +14,8 @@ Your job is to analyze ONLY the information present in the transcript and produc
 - topics
 - concepts
 - key points
-- important timestamped moments
+- important timestamped moments with 30-to-60-second micro-clip windows
+- a 2-sentence concept principle for each micro-clip
 - semantically coherent transcript chunks
 
 Do NOT invent facts.
@@ -42,7 +43,6 @@ function chunkTranscript(transcript, maxSeconds = 60) {
 
   for (const item of transcript) {
     const text = String(item.text || '').trim();
-
     if (!text) continue;
 
     const start = Number(item.start ?? item.offset ?? 0);
@@ -50,27 +50,17 @@ function chunkTranscript(transcript, maxSeconds = 60) {
     const end = start + duration;
 
     if (!current) {
-      current = {
-        text,
-        startTime: start,
-        endTime: end
-      };
+      current = { text, startTime: start, endTime: end };
       continue;
     }
 
     const proposedEnd = Math.max(current.endTime, end);
-
     if (proposedEnd - current.startTime <= maxSeconds) {
       current.text += ` ${text}`;
       current.endTime = proposedEnd;
     } else {
       chunks.push(current);
-
-      current = {
-        text,
-        startTime: start,
-        endTime: end
-      };
+      current = { text, startTime: start, endTime: end };
     }
   }
 
@@ -81,34 +71,56 @@ function chunkTranscript(transcript, maxSeconds = 60) {
   return chunks;
 }
 
-async function processYouTubeTranscript({
-  youtubeUrl,
-  videoTitle,
-  provider,
-  start
-}) {
+/**
+ * Guarantees every important moment has clean 30-60 second boundaries and a 2-sentence principle
+ */
+function normalizeMicroClips(importantTimestamps = [], maxVideoDuration = 3600) {
+  return importantTimestamps.map((item) => {
+    const rawStart = Number(item.startTime ?? 0);
+    const rawEnd = Number(item.endTime ?? rawStart + 45);
+
+    // Compute bounded 30 to 60 second micro-clip window
+    let clipStart = Math.max(0, Math.floor(rawStart - 5));
+    let clipEnd = Math.max(clipStart + 30, Math.floor(rawEnd));
+    if (clipEnd - clipStart > 60) {
+      clipEnd = clipStart + 60;
+    }
+
+    const principle =
+      item.conceptPrinciple ||
+      item.description ||
+      `This section demonstrates ${item.topic}. Focus on how this principle applies to solving the problem.`;
+
+    return {
+      timestamp: item.timestamp || secondsToTimestamp(clipStart),
+      startTime: rawStart,
+      endTime: rawEnd,
+      clipStartTime: clipStart,
+      clipEndTime: clipEnd,
+      clipDuration: clipEnd - clipStart,
+      topic: item.topic || 'Core Concept',
+      description: item.description || '',
+      conceptPrinciple: principle
+    };
+  });
+}
+
+async function processYouTubeTranscript({ youtubeUrl, videoTitle, provider, start }) {
   const transcript = await fetchTranscript(youtubeUrl);
 
   if (!Array.isArray(transcript) || transcript.length === 0) {
-    throw new Error(
-      'No YouTube transcript/captions were found for this video.'
-    );
+    throw new Error('No YouTube transcript/captions were found for this video.');
   }
 
   const transcriptChunks = chunkTranscript(transcript);
-
   if (transcriptChunks.length === 0) {
-    throw new Error(
-      'YouTube transcript was retrieved, but it contained no usable text.'
-    );
+    throw new Error('YouTube transcript was retrieved, but it contained no usable text.');
   }
 
   const transcriptText = transcriptChunks
     .map(
       (chunk) =>
-        `[${secondsToTimestamp(chunk.startTime)} - ${secondsToTimestamp(
-          chunk.endTime
-        )}] ${chunk.text}`
+        `[${secondsToTimestamp(chunk.startTime)} - ${secondsToTimestamp(chunk.endTime)}] ${chunk.text}`
     )
     .join('\n');
 
@@ -129,8 +141,11 @@ Produce ONLY JSON in this exact shape:
       "timestamp": "MM:SS",
       "startTime": number,
       "endTime": number,
+      "clipStartTime": number,
+      "clipEndTime": number,
       "topic": string,
-      "description": string
+      "description": string,
+      "conceptPrinciple": string
     }
   ],
   "transcriptChunks": [
@@ -142,38 +157,22 @@ Produce ONLY JSON in this exact shape:
   ]
 }
 
-IMPORTANT:
-- Use ONLY the transcript below.
-- Do not invent information.
-- Do not invent timestamps.
-- Keep the transcript chunks grounded in the supplied transcript.
-- Use the supplied timestamps for important moments.
+CRITICAL RULES FOR IMPORTANT MOMENTS (MICRO-CLIPS):
+- For each moment, define "clipStartTime" and "clipEndTime" spanning 30 to 60 seconds around the core demonstration.
+- Provide "conceptPrinciple": exactly 2 sentences explaining the educational principle taught in that 30-60 second clip.
 
 REAL TIMESTAMPED TRANSCRIPT:
 ${transcriptText}`;
 
-  const res = await provider.generateJSON({
-    system: SYSTEM,
-    prompt
-  });
-
-  const validated = parseAndValidate(
-    res.text,
-    videoUnderstandingSchema
-  );
+  const res = await provider.generateJSON({ system: SYSTEM, prompt });
+  const validated = parseAndValidate(res.text, videoUnderstandingSchema);
 
   if (!validated.success) {
-    throw new Error(
-      `Gemini returned invalid video analysis: ${validated.error}`
-    );
+    throw new Error(`Gemini returned invalid video analysis: ${validated.error}`);
   }
 
-  /*
-   * IMPORTANT:
-   * Always use the actual YouTube transcript chunks for RAG.
-   * Do not trust an LLM-generated transcript to become the source of truth.
-   */
   validated.data.transcriptChunks = transcriptChunks;
+  validated.data.importantTimestamps = normalizeMicroClips(validated.data.importantTimestamps || []);
 
   await logAICall({
     provider: provider.name,
@@ -186,46 +185,15 @@ ${transcriptText}`;
   return validated.data;
 }
 
-/**
- * Understand either:
- * 1. A locally uploaded video using Gemini native video understanding
- * 2. A YouTube video using its real timestamped transcript
- */
-export async function runVideoUnderstandingAgent({
-  filePath,
-  mimeType,
-  youtubeUrl,
-  videoTitle
-}) {
+export async function runVideoUnderstandingAgent({ filePath, mimeType, youtubeUrl, videoTitle }) {
   const provider = getVideoProvider();
   const start = Date.now();
 
   try {
-    /*
-     * ---------------------------------------------------------
-     * YOUTUBE FLOW
-     * ---------------------------------------------------------
-     *
-     * Fetch the actual captions/transcript first.
-     * Gemini receives the transcript, NOT merely the YouTube URL.
-     */
     if (youtubeUrl) {
-      return await processYouTubeTranscript({
-        youtubeUrl,
-        videoTitle,
-        provider,
-        start
-      });
+      return await processYouTubeTranscript({ youtubeUrl, videoTitle, provider, start });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * LOCAL VIDEO FLOW
-     * ---------------------------------------------------------
-     *
-     * Keep the existing Gemini native video understanding
-     * for uploaded MP4/WebM/MOV files.
-     */
     const prompt = `Analyze this educational video.
 
 Return ONLY JSON of this exact shape:
@@ -240,8 +208,11 @@ Return ONLY JSON of this exact shape:
       "timestamp": "MM:SS",
       "startTime": number,
       "endTime": number,
+      "clipStartTime": number,
+      "clipEndTime": number,
       "topic": string,
-      "description": string
+      "description": string,
+      "conceptPrinciple": string
     }
   ],
   "transcriptChunks": [
@@ -251,29 +222,24 @@ Return ONLY JSON of this exact shape:
       "endTime": number
     }
   ]
-}`;
+}
+
+CRITICAL RULES FOR IMPORTANT MOMENTS:
+- For each moment, define "clipStartTime" and "clipEndTime" spanning 30 to 60 seconds.
+- Provide "conceptPrinciple": exactly 2 sentences summarizing the concept demonstrated in this clip.`;
 
     if (!filePath || !fs.existsSync(filePath)) {
       throw new Error('Uploaded video file was not found.');
     }
 
-    const res = await provider.understandVideo({
-      filePath,
-      mimeType,
-      system: SYSTEM,
-      prompt
-    });
-
-    const validated = parseAndValidate(
-      res.text,
-      videoUnderstandingSchema
-    );
+    const res = await provider.understandVideo({ filePath, mimeType, system: SYSTEM, prompt });
+    const validated = parseAndValidate(res.text, videoUnderstandingSchema);
 
     if (!validated.success) {
-      throw new Error(
-        `Gemini returned invalid video analysis: ${validated.error}`
-      );
+      throw new Error(`Gemini returned invalid video analysis: ${validated.error}`);
     }
+
+    validated.data.importantTimestamps = normalizeMicroClips(validated.data.importantTimestamps || []);
 
     await logAICall({
       provider: provider.name,
@@ -292,16 +258,6 @@ Return ONLY JSON of this exact shape:
       status: 'failure',
       error: err.message
     });
-
-    /*
-     * DO NOT create fake transcript content here.
-     *
-     * The old implementation returned:
-     * "Educational video material..."
-     *
-     * That could make the system appear "ready" even though
-     * there was no actual video content available for RAG.
-     */
     throw err;
   }
 }

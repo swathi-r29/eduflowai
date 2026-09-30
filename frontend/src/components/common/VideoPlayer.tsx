@@ -1,7 +1,7 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import type { VideoItem } from '../../types';
 import { parseTimestampToSeconds, formatSecondsToTimestamp } from '../../utils/timestampUtils';
-import { Play, Clock, Sparkles, Tag, Youtube } from 'lucide-react';
+import { Play, Clock, Sparkles, Tag, Youtube, Repeat, HelpCircle } from 'lucide-react';
 
 export interface VideoPlayerRef {
   seekTo: (seconds: number) => void;
@@ -11,6 +11,13 @@ export interface VideoPlayerRef {
 interface VideoPlayerProps {
   video: VideoItem;
   baseUrl?: string;
+}
+
+interface ActiveClip {
+  clipStartTime: number;
+  clipEndTime: number;
+  topic: string;
+  conceptPrinciple?: string;
 }
 
 function getYoutubeId(url: string): string | null {
@@ -23,6 +30,9 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
   const internalVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [ytStartSec, setYtStartSec] = useState(0);
+  const [ytEndSec, setYtEndSec] = useState<number | null>(null);
+  const [isLoopingClip, setIsLoopingClip] = useState(false);
+  const [activeClip, setActiveClip] = useState<ActiveClip | null>(null);
 
   const isYoutube = Boolean(
     video.youtubeUrl ||
@@ -34,8 +44,11 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
 
   useImperativeHandle(ref, () => ({
     seekTo: (seconds: number) => {
+      setIsLoopingClip(false);
+      setActiveClip(null);
       if (isYoutube) {
         setYtStartSec(seconds);
+        setYtEndSec(null);
         if (containerRef.current) {
           containerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -52,7 +65,22 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
     }
   }));
 
-  // Build static video URL from stored path
+  // HTML5 Video micro-clip loop handler
+  useEffect(() => {
+    const vidEl = internalVideoRef.current;
+    if (!vidEl || !isLoopingClip || !activeClip) return;
+
+    const onTimeUpdate = () => {
+      if (vidEl.currentTime >= activeClip.clipEndTime) {
+        vidEl.currentTime = activeClip.clipStartTime;
+        vidEl.play().catch(() => {});
+      }
+    };
+
+    vidEl.addEventListener('timeupdate', onTimeUpdate);
+    return () => vidEl.removeEventListener('timeupdate', onTimeUpdate);
+  }, [isLoopingClip, activeClip]);
+
   let videoSrc = '';
   if (!isYoutube && video.storedPath) {
     const filename = video.storedPath.split(/[\/\\]/).pop();
@@ -60,12 +88,40 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
   }
 
   const handleSeek = (ts: string | number) => {
+    setIsLoopingClip(false);
+    setActiveClip(null);
     const seconds = parseTimestampToSeconds(ts);
     if (isYoutube) {
       setYtStartSec(seconds);
+      setYtEndSec(null);
     } else if (internalVideoRef.current) {
       internalVideoRef.current.currentTime = seconds;
       internalVideoRef.current.play().catch(() => {});
+    }
+  };
+
+  const handlePlayMicroClip = (clip: any) => {
+    const start = clip.clipStartTime ?? clip.startTime ?? parseTimestampToSeconds(clip.timestamp);
+    const end = clip.clipEndTime ?? start + 45;
+
+    setActiveClip({
+      clipStartTime: start,
+      clipEndTime: end,
+      topic: clip.topic,
+      conceptPrinciple: clip.conceptPrinciple || clip.description
+    });
+    setIsLoopingClip(true);
+
+    if (isYoutube) {
+      setYtStartSec(start);
+      setYtEndSec(end);
+      if (containerRef.current) {
+        containerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    } else if (internalVideoRef.current) {
+      internalVideoRef.current.currentTime = start;
+      internalVideoRef.current.play().catch(() => {});
+      internalVideoRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
 
@@ -76,22 +132,35 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
           {isYoutube ? <Youtube size={20} className="text-red-500" /> : <Play size={18} className="text-brand-indigo" />}
           {video.originalName}
         </h3>
-        <span className={`text-xs px-2.5 py-1 rounded font-medium ${
-          video.status === 'ready' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-          : video.status === 'failed' ? 'bg-red-500/20 text-red-400'
-          : 'bg-amber-500/20 text-amber-400 animate-pulse'
-        }`}>
-          {video.status}
-        </span>
+        <div className="flex items-center gap-2">
+          {isLoopingClip && (
+            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-brand-indigo/20 text-indigo-300 border border-brand-indigo/40 animate-pulse">
+              <Repeat size={12} /> Loop Active
+            </span>
+          )}
+          <span
+            className={`text-xs px-2.5 py-1 rounded font-medium ${
+              video.status === 'ready'
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : video.status === 'failed'
+                ? 'bg-red-500/20 text-red-400'
+                : 'bg-amber-500/20 text-amber-400 animate-pulse'
+            }`}
+          >
+            {video.status}
+          </span>
+        </div>
       </div>
 
       {/* Video Player Display: YouTube iFrame or HTML5 Video */}
       {isYoutube && ytId ? (
         <div className="w-full aspect-video rounded-lg overflow-hidden bg-black shadow-md border border-base-700">
           <iframe
-            key={`${ytId}-${ytStartSec}`}
+            key={`${ytId}-${ytStartSec}-${ytEndSec}-${isLoopingClip}`}
             title={video.originalName}
-            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&start=${Math.floor(ytStartSec)}`}
+            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&start=${Math.floor(ytStartSec)}${
+              ytEndSec && isLoopingClip ? `&end=${Math.floor(ytEndSec)}&loop=1&playlist=${ytId}` : ''
+            }`}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             className="w-full h-full border-0"
@@ -111,7 +180,32 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
         </div>
       )}
 
-      {/* AI Processed Video Summary & Important Timestamps */}
+      {/* Active Micro-Clip Banner */}
+      {activeClip && isLoopingClip && (
+        <div className="bg-brand-indigo/15 border border-brand-indigo/30 p-3 rounded-lg flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+              <Repeat size={14} /> Looping Micro-Clip: {activeClip.topic} ({formatSecondsToTimestamp(activeClip.clipStartTime)} - {formatSecondsToTimestamp(activeClip.clipEndTime)})
+            </p>
+            {activeClip.conceptPrinciple && (
+              <p className="text-xs text-slate-300 leading-relaxed italic">
+                "{activeClip.conceptPrinciple}"
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              setIsLoopingClip(false);
+              setActiveClip(null);
+            }}
+            className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-base-800 border border-base-700"
+          >
+            Exit Loop
+          </button>
+        </div>
+      )}
+
+      {/* AI Processed Video Summary & Targeted Micro-Clips */}
       {video.status === 'ready' && (
         <div className="space-y-3 pt-2 text-sm">
           {video.summary && (
@@ -126,25 +220,52 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ video, baseU
           {video.importantTimestamps && video.importantTimestamps.length > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase text-slate-400 mb-2 flex items-center gap-1.5">
-                <Clock size={14} className="text-brand-indigo" /> Key Timestamps (Click to Jump)
+                <Clock size={14} className="text-brand-indigo" /> Targeted Micro-Clips & Concepts
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {video.importantTimestamps.map((t, idx) => {
-                  const sec = t.startTime ?? parseTimestampToSeconds(t.timestamp);
+                {video.importantTimestamps.map((t: any, idx: number) => {
+                  const clipStart = t.clipStartTime ?? t.startTime ?? parseTimestampToSeconds(t.timestamp);
+                  const clipEnd = t.clipEndTime ?? clipStart + 45;
+                  const duration = clipEnd - clipStart;
+
                   return (
-                    <button
+                    <div
                       key={idx}
-                      onClick={() => handleSeek(sec)}
-                      className="flex items-start gap-2.5 p-2 rounded-lg bg-base-800 hover:bg-brand-indigo/20 border border-base-700 hover:border-brand-indigo/40 text-left transition-colors group"
+                      className="p-3 rounded-lg bg-base-800 border border-base-700 hover:border-brand-indigo/40 transition-colors flex flex-col justify-between gap-2"
                     >
-                      <span className="text-xs font-mono font-bold bg-brand-indigo/30 text-indigo-300 px-2 py-0.5 rounded group-hover:bg-brand-indigo group-hover:text-white transition-colors">
-                        {formatSecondsToTimestamp(sec)}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-200 truncate">{t.topic}</p>
-                        {t.description && <p className="text-[11px] text-slate-400 line-clamp-1">{t.description}</p>}
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs font-bold text-slate-200 truncate">{t.topic}</span>
+                          <span className="text-[10px] font-mono bg-base-700 text-slate-300 px-1.5 py-0.5 rounded">
+                            {duration}s clip
+                          </span>
+                        </div>
+                        {t.conceptPrinciple ? (
+                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                            {t.conceptPrinciple}
+                          </p>
+                        ) : t.description ? (
+                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                            {t.description}
+                          </p>
+                        ) : null}
                       </div>
-                    </button>
+
+                      <div className="flex items-center gap-2 pt-1 border-t border-base-700/50">
+                        <button
+                          onClick={() => handlePlayMicroClip(t)}
+                          className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1.5"
+                        >
+                          <Repeat size={12} /> Play & Loop Clip
+                        </button>
+                        <button
+                          onClick={() => handleSeek(clipStart)}
+                          className="btn-secondary text-[11px] py-1 px-2 text-slate-400 hover:text-white"
+                        >
+                          Jump ({formatSecondsToTimestamp(clipStart)})
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>

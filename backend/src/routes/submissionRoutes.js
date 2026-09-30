@@ -8,6 +8,7 @@ import {
   triggerGradingPipeline,
   auditGradingConsistency,
   getClassReTeachPlan,
+  checkAssignmentPlagiarism,
   getSubmission,
   listSubmissions,
   calibrateGrading
@@ -30,6 +31,7 @@ router.post('/ocr', ocrSubmission);
 router.post('/grading/:id', triggerGradingPipeline);
 router.post('/audit/:id', auditGradingConsistency);
 router.post('/class-reteach/:assignmentId', requireRole('teacher'), getClassReTeachPlan);
+router.post('/plagiarism/:assignmentId', requireRole('teacher', 'admin'), checkAssignmentPlagiarism);
 
 // 5. Querying & Calibration
 router.get('/', listSubmissions);
@@ -38,3 +40,4 @@ router.get('/:id', getSubmission);
 router.post('/grading/:id/calibrate', requireRole('teacher'), calibrateGrading);
 
 export default router;
+

@@ -9,16 +9,23 @@ export const submissionUnderstandingSchema = z.object({
   evidence: z.array(z.string())
 });
 
+export const rubricCriterionSchema = z.object({
+  criterion: z.string(),
+  score: z.number(),
+  maxPoints: z.number(),
+  reasoning: z.string(),
+  evidence: z.string(),
+  confidence: z.number().min(0).max(1).default(0.9),
+  confidenceReason: z.string().optional().default('')
+});
+
 export const rubricEvaluationSchema = z.object({
   totalScore: z.number(),
   maxScore: z.number(),
-  criteriaScores: z.array(z.object({
-    criterion: z.string(),
-    score: z.number(),
-    maxPoints: z.number(),
-    reasoning: z.string(),
-    evidence: z.string()
-  }))
+  overallConfidence: z.number().min(0).max(1).default(0.9),
+  requiresTeacherReview: z.boolean().default(false),
+  reviewReason: z.string().optional().default(''),
+  criteriaScores: z.array(rubricCriterionSchema)
 });
 
 export const rootCauseSchema = z.object({

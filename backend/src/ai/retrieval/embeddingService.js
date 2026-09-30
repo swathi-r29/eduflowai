@@ -5,6 +5,9 @@ export async function embedOne(text) {
   return provider.embedText(text);
 }
 
+// Alias for compatibility with analytics & clustering services
+export const generateEmbedding = embedOne;
+
 export async function embedMany(texts) {
   const provider = getEmbeddingProvider();
   const out = [];

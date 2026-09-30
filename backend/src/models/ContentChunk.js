@@ -18,5 +18,7 @@ const contentChunkSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 contentChunkSchema.index({ workspace: 1, sourceType: 1 });
+// Index for keyword search matching the text field
+contentChunkSchema.index({ text: 'text' });
 
 export default mongoose.model('ContentChunk', contentChunkSchema);

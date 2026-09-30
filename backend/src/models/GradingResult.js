@@ -2,8 +2,8 @@ import mongoose from 'mongoose';
 
 const gradingResultSchema = new mongoose.Schema({
   submission: { type: mongoose.Schema.Types.ObjectId, ref: 'Submission', required: true, index: true },
-  assignment: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment', required: true },
-  student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  assignment: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment', required: true, index: true },
+  student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
 
   understanding: { type: mongoose.Schema.Types.Mixed }, // SubmissionUnderstandingAgent output
   executionResults: { type: mongoose.Schema.Types.Mixed }, // Deterministic execution evidence (tests passed/failed, expected vs actual)
@@ -17,7 +17,17 @@ const gradingResultSchema = new mongoose.Schema({
 
   aiScore: { type: Number },
   aiMaxScore: { type: Number },
-  aiConfidence: { type: Number },
+  aiConfidence: { type: Number, default: 1.0 },
+
+  // Teacher Review Routing Flags
+  requiresTeacherReview: { type: Boolean, default: false, index: true },
+  reviewReason: { type: String, default: null },
+  status: { 
+    type: String, 
+    enum: ['draft', 'needs_review', 'published', 'overridden'], 
+    default: 'published',
+    index: true 
+  },
 
   teacherScore: { type: Number, default: null },
   teacherFeedback: { type: String, default: null },

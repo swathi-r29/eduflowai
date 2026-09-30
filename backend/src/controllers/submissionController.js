@@ -12,6 +12,57 @@ import { runConsistencyAudit, generateReTeachPlan } from '../ai/agents/analytics
 import { logger } from '../utils/logger.js';
 
 /**
+ * Normalizes text/code by stripping comments, non-alphanumeric chars, and duplicate whitespace
+ */
+function normalizeForComparison(text = '') {
+  return text
+    .replace(/#.*$/gm, '') // Remove Python comments
+    .replace(/\/\/.*$/gm, '') // Remove JS comments
+    .replace(/\/\*[\s\S]*?\*\//g, '') // Remove block comments
+    .replace(/"""[\s\S]*?"""|'''[\s\S]*?'''/g, '') // Remove docstrings
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Builds character/word n-gram frequency map
+ */
+function getNGrams(text, n = 3) {
+  const words = text.split(' ').filter(Boolean);
+  if (words.length < n) return new Set(words);
+  const ngrams = new Set();
+  for (let i = 0; i <= words.length - n; i++) {
+    ngrams.add(words.slice(i, i + n).join(' '));
+  }
+  return ngrams;
+}
+
+/**
+ * Computes Jaccard similarity across n-grams (robust to variable renaming)
+ */
+function computeNgramSimilarity(textA, textB) {
+  const normA = normalizeForComparison(textA);
+  const normB = normalizeForComparison(textB);
+  if (!normA || !normB) return 0;
+  if (normA === normB) return 1.0;
+
+  const setA = getNGrams(normA, 3);
+  const setB = getNGrams(normB, 3);
+
+  if (!setA.size || !setB.size) return 0;
+
+  let intersectionCount = 0;
+  for (const item of setA) {
+    if (setB.has(item)) intersectionCount++;
+  }
+
+  const unionSize = setA.size + setB.size - intersectionCount;
+  return unionSize > 0 ? intersectionCount / unionSize : 0;
+}
+
+/**
  * 1. Standard Student Submission
  */
 export const createSubmission = asyncHandler(async (req, res) => {
@@ -54,7 +105,9 @@ export const createPublicSubmission = asyncHandler(async (req, res) => {
   const { studentName, rollNumber, answerText } = req.body;
 
   if (!answerText) throw new ApiError(400, 'answerText is required');
-  if (!studentName && !rollNumber) throw new ApiError(400, 'studentName or rollNumber is required for public submission');
+  if (!studentName && !rollNumber) {
+    throw new ApiError(400, 'studentName or rollNumber is required for public submission');
+  }
 
   const assignment = await Assignment.findById(assignmentId);
   if (!assignment) throw new ApiError(404, 'Assignment not found');
@@ -100,7 +153,6 @@ export const ocrSubmission = asyncHandler(async (req, res) => {
   const assignment = await Assignment.findById(assignmentId);
   if (!assignment) throw new ApiError(404, 'Assignment not found');
 
-  // Transcribe handwritten image using Gemini Multimodal Vision
   const ocrResult = await parseHandwrittenOCR({ imageInput });
 
   const submission = await Submission.create({
@@ -155,6 +207,113 @@ export const preflightCheck = asyncHandler(async (req, res) => {
 });
 
 /**
+ * 1.4 Batch Plagiarism & Multi-Submission Similarity Check (Threshold >= 0.80)
+ * POST /api/submissions/plagiarism/:assignmentId
+ */
+export const checkAssignmentPlagiarism = asyncHandler(async (req, res) => {
+  const { assignmentId } = req.params;
+  const assignment = await Assignment.findById(assignmentId);
+  if (!assignment) throw new ApiError(404, 'Assignment not found');
+
+  // Verify authorization for teachers
+  if (req.user?.role === 'teacher') {
+    const cls = await ClassModel.findById(assignment.class);
+    if (!cls || String(cls.teacher) !== String(req.user._id)) {
+      throw new ApiError(403, 'Forbidden: You can only check plagiarism for your own class');
+    }
+  }
+
+  const submissions = await Submission.find({ assignment: assignmentId });
+  if (submissions.length < 2) {
+    return res.json({
+      message: 'Not enough submissions to run batch similarity check (minimum 2 required).',
+      flaggedCount: 0,
+      comparisons: 0,
+      flaggedPairs: []
+    });
+  }
+
+  const flaggedPairs = [];
+  const similarityMap = new Map();
+
+  for (const sub of submissions) {
+    similarityMap.set(String(sub._id), {
+      maxSimilarity: 0,
+      matchedSubmission: null,
+      matchedStudentName: null
+    });
+  }
+
+  const THRESHOLD = 0.80; // 80% similarity threshold
+
+  for (let i = 0; i < submissions.length; i++) {
+    for (let j = i + 1; j < submissions.length; j++) {
+      const subA = submissions[i];
+      const subB = submissions[j];
+
+      // Avoid matching same student duplicate drafts
+      if (subA.student && subB.student && String(subA.student) === String(subB.student)) {
+        continue;
+      }
+
+      const score = computeNgramSimilarity(subA.answerText, subB.answerText);
+      const roundedScore = Number(score.toFixed(3));
+
+      const statsA = similarityMap.get(String(subA._id));
+      if (roundedScore > statsA.maxSimilarity) {
+        statsA.maxSimilarity = roundedScore;
+        statsA.matchedSubmission = subB._id;
+        statsA.matchedStudentName = subB.studentName || 'Student';
+      }
+
+      const statsB = similarityMap.get(String(subB._id));
+      if (roundedScore > statsB.maxSimilarity) {
+        statsB.maxSimilarity = roundedScore;
+        statsB.matchedSubmission = subA._id;
+        statsB.matchedStudentName = subA.studentName || 'Student';
+      }
+
+      if (roundedScore >= THRESHOLD) {
+        flaggedPairs.push({
+          submissionA: { id: subA._id, studentName: subA.studentName },
+          submissionB: { id: subB._id, studentName: subB.studentName },
+          similarity: roundedScore
+        });
+      }
+    }
+  }
+
+  // Update records in DB
+  const bulkOps = submissions.map((sub) => {
+    const stats = similarityMap.get(String(sub._id));
+    const flagged = stats.maxSimilarity >= THRESHOLD;
+    return {
+      updateOne: {
+        filter: { _id: sub._id },
+        update: {
+          $set: {
+            'plagiarism.flagged': flagged,
+            'plagiarism.maxSimilarity': stats.maxSimilarity,
+            'plagiarism.matchedSubmission': stats.matchedSubmission,
+            'plagiarism.matchedStudentName': stats.matchedStudentName,
+            'plagiarism.checkedAt': new Date()
+          }
+        }
+      }
+    };
+  });
+
+  await Submission.bulkWrite(bulkOps);
+
+  res.json({
+    message: `Batch similarity check complete. Evaluated ${submissions.length} submissions.`,
+    flaggedCount: flaggedPairs.length,
+    threshold: THRESHOLD,
+    flaggedPairs
+  });
+});
+
+/**
  * 2. Trigger AI Grading Pipeline manually
  * POST /api/grading/:id or POST /api/submissions/grading/:id
  */
@@ -173,7 +332,10 @@ export const triggerGradingPipeline = asyncHandler(async (req, res) => {
   submission.status = 'ai_evaluated';
   await submission.save();
 
-  const revisionPlan = await RevisionPlan.findOne({ submission: submission._id, gradingResult: pipelineResult.gradingResult?._id });
+  const revisionPlan = await RevisionPlan.findOne({
+    submission: submission._id,
+    gradingResult: pipelineResult.gradingResult?._id
+  });
 
   res.json({
     message: 'AI grading pipeline completed',
@@ -185,8 +347,7 @@ export const triggerGradingPipeline = asyncHandler(async (req, res) => {
 });
 
 /**
- * 3. Consistency Audit (3-point paraphrase cross-validation)
- * POST /api/grading/audit/:id
+ * 3. Consistency Audit
  */
 export const auditGradingConsistency = asyncHandler(async (req, res) => {
   const gradingResult = await GradingResult.findById(req.params.id).populate('assignment');
@@ -204,7 +365,6 @@ export const auditGradingConsistency = asyncHandler(async (req, res) => {
 
 /**
  * 4. Class Re-Teaching & Peer-Tutoring Generator
- * POST /api/grading/class-reteach/:assignmentId
  */
 export const getClassReTeachPlan = asyncHandler(async (req, res) => {
   const { assignmentId } = req.params;
@@ -267,7 +427,10 @@ export const listSubmissions = asyncHandler(async (req, res) => {
     }
   }
 
-  const submissions = await Submission.find(filter).populate('assignment', 'title maxScore').sort({ createdAt: -1 });
+  const submissions = await Submission.find(filter)
+    .populate('assignment', 'title maxScore')
+    .sort({ createdAt: -1 });
+
   res.json({ submissions });
 });
 
