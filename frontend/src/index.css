@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply antialiased bg-[#F4F8FD] text-slate-800 font-sans selection:bg-blue-100 selection:text-blue-700;
+}
+
+/* Ambient Blue Splash Background */
+.bg-ambient-splash {
+  background-color: #F4F8FD;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(186, 230, 253, 0.6) 0%, transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(199, 210, 254, 0.5) 0%, transparent 45%),
+    radial-gradient(circle at 50% 80%, rgba(224, 231, 255, 0.4) 0%, transparent 50%);
+}
+
+/* Light Glass & Surface Cards */
+.card {
+  @apply bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm shadow-slate-200/60 backdrop-blur-sm transition-all;
+}
+.card-hover {
+  @apply hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-200;
+}
+.card-inner {
+  @apply bg-slate-50/90 border border-slate-200/60 rounded-xl p-4;
+}
+
+/* Buttons matching Hero & Header actions */
+.btn-primary {
+  @apply bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer;
+}
+.btn-secondary {
+  @apply bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 font-semibold px-5 py-2.5 rounded-xl shadow-sm hover:border-slate-300 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer;
+}
+.btn-ghost {
+  @apply text-slate-600 hover:text-blue-600 font-medium px-4 py-2 flex items-center justify-center gap-1.5 transition-colors cursor-pointer;
+}
+
+/* Form Elements */
+.input-field {
+  @apply bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white transition-all w-full;
+}
+.label {
+  @apply text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5 block;
+}
+
+/* Pill Badges */
+.badge-blue {
+  @apply bg-blue-50 text-blue-600 border border-blue-100 rounded-full px-3 py-1 text-xs font-semibold inline-flex items-center gap-1.5;
+}
+.badge-purple {
+  @apply bg-purple-50 text-purple-600 border border-purple-100 rounded-full px-3 py-1 text-xs font-semibold inline-flex items-center gap-1.5;
+}
+.badge-amber {
+  @apply bg-amber-50 text-amber-700 border border-amber-200/80 rounded-full px-3 py-1 text-xs font-semibold inline-flex items-center gap-1.5;
+}
+.badge-green {
+  @apply bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-full px-3 py-1 text-xs font-semibold inline-flex items-center gap-1.5;
+}
