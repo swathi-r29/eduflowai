@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import Submission from '../models/Submission.js';
@@ -10,6 +11,7 @@ import { parseHandwrittenOCR } from '../ai/agents/ocrAgent.js';
 import { runPreflightCheck } from '../ai/agents/preflightAgent.js';
 import { runConsistencyAudit, generateReTeachPlan } from '../ai/agents/analyticsEnhancementAgent.js';
 import { logger } from '../utils/logger.js';
+
 
 /**
  * Normalizes text/code by stripping comments, non-alphanumeric chars, and duplicate whitespace
@@ -192,7 +194,13 @@ export const ocrSubmission = asyncHandler(async (req, res) => {
  */
 export const preflightCheck = asyncHandler(async (req, res) => {
   const { assignmentId, answerText } = req.body;
-  if (!assignmentId || !answerText) throw new ApiError(400, 'assignmentId and answerText are required');
+  if (!assignmentId || !answerText) {
+    throw new ApiError(400, 'assignmentId and answerText are required');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
+    throw new ApiError(400, `Invalid assignmentId format: "${assignmentId}"`);
+  }
 
   const assignment = await Assignment.findById(assignmentId);
   if (!assignment) throw new ApiError(404, 'Assignment not found');
@@ -205,6 +213,7 @@ export const preflightCheck = asyncHandler(async (req, res) => {
 
   res.json({ preflight: preflightResult });
 });
+
 
 /**
  * 1.4 Batch Plagiarism & Multi-Submission Similarity Check (Threshold >= 0.80)
