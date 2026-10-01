@@ -106,8 +106,45 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           />
         </svg>
 
+        {/* Top Navbar Header */}
+        <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-6 md:px-8 py-3 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              {user?.role === 'student' ? 'Student Portal' : user?.role === 'teacher' ? 'Teacher Portal' : 'Admin Portal'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {user && user.role === 'student' && (
+              <div className="flex items-center gap-3 bg-slate-900 text-white px-3.5 py-1.5 rounded-full border border-slate-800 text-xs font-semibold shadow-sm">
+                {/* Streak Badge */}
+                <div className="flex items-center gap-1.5 text-amber-400" title="Daily Streak">
+                  <span>🔥</span>
+                  <span>{user.streak || 0}</span>
+                </div>
+
+                <div className="w-[1px] h-3.5 bg-slate-700" />
+
+                {/* XP Badge */}
+                <div className="flex items-center gap-1.5 text-indigo-400" title="Total Experience Points">
+                  <span>⚡</span>
+                  <span>{user.xp || 0} XP</span>
+                </div>
+
+                <div className="w-[1px] h-3.5 bg-slate-700" />
+
+                {/* Level Badge */}
+                <div className="flex items-center gap-1 text-emerald-400" title="Current Level">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Lvl</span>
+                  <span>{user.level || 1}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </header>
+
         {/* Content Container */}
-        <div className="max-w-6xl mx-auto px-6 md:px-8 py-8 relative z-10">{children}</div>
+        <div className="w-full px-6 md:px-8 py-8 relative z-10">{children}</div>
       </main>
     </div>
   );

@@ -45,7 +45,16 @@ export const getWorkspace = asyncHandler(async (req, res) => {
         vid.summary = vid.summary || `Educational video ${vid.originalName} ready for viewing and study.`;
         if (!vid.importantTimestamps || vid.importantTimestamps.length === 0) {
           vid.importantTimestamps = [
-            { timestamp: '00:00', startTime: 0, endTime: 60, topic: 'Introduction', description: 'Start of video lecture' }
+            {
+              timestamp: '00:00',
+              startTime: 0,
+              endTime: 60,
+              clipStartTime: 0,
+              clipEndTime: 60,
+              clipDuration: 60,
+              topic: 'Introduction',
+              description: 'Start of video lecture'
+            }
           ];
         }
         await vid.save();

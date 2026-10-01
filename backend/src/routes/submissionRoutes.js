@@ -11,7 +11,8 @@ import {
   checkAssignmentPlagiarism,
   getSubmission,
   listSubmissions,
-  calibrateGrading
+  calibrateGrading,
+  completeJourneyNode
 } from '../controllers/submissionController.js';
 
 const router = Router();
@@ -27,13 +28,17 @@ router.use(requireAuth);
 router.post('/', requireRole('student'), createSubmission);
 router.post('/ocr', ocrSubmission);
 
-// 4. Grading Pipeline Trigger & Analytics
+// 4. Journey Skill Tree Nodes
+router.post('/journey/complete-node', completeJourneyNode);
+
+// 5. Grading Pipeline Trigger & Analytics
 router.post('/grading/:id', triggerGradingPipeline);
 router.post('/audit/:id', auditGradingConsistency);
 router.post('/class-reteach/:assignmentId', requireRole('teacher'), getClassReTeachPlan);
 router.post('/plagiarism/:assignmentId', requireRole('teacher', 'admin'), checkAssignmentPlagiarism);
 
-// 5. Querying & Calibration
+// 6. Querying & Calibration
+router.get('/mine', listSubmissions);
 router.get('/', listSubmissions);
 router.get('/assignment/:assignmentId', listSubmissions);
 router.get('/:id', getSubmission);

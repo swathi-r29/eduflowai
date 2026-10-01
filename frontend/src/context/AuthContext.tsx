@@ -1,108 +1,80 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '../api/client';
 import type { User } from '../types';
 
-interface AuthContextValue {
+interface AuthContextType {
   user: User | null;
+  loading: boolean;
   login: (email: string, password: string, role?: string) => Promise<User>;
-  register: (name: string, email: string, password: string, role: string) => Promise<User>;
+  register: (name: string, email: string, password: string, role?: string) => Promise<User>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const raw = localStorage.getItem('eduflow_user');
-    return raw ? JSON.parse(raw) : null;
-  });
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const persist = (token: string, u: User) => {
-    localStorage.setItem('eduflow_token', token);
-    localStorage.setItem('eduflow_user', JSON.stringify(u));
-    setUser(u);
+  const refreshUser = async () => {
+    const token = localStorage.getItem('eduflow_token');
+    if (!token) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { data } = await api.get('/auth/me');
+      setUser(data.user || null);
+    } catch (err) {
+      console.error('Failed to fetch user profile:', err);
+      localStorage.removeItem('eduflow_token');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const login = useCallback(async (email: string, password: string, role: string = 'student') => {
-    let endpoint = '/auth/login';
-    let body: any = { email, password };
-
-    if (role === 'student') {
-      endpoint = '/auth/student-login';
-      body = { email, identifier: email, password };
-    } else if (role === 'admin') {
-      endpoint = '/auth/admin-login';
-      body = { email, identifier: email, password };
-    }
-
-    try {
-      const { data } = await api.post(endpoint, body);
-      const userObj: User = {
-        id: data._id || data.user?.id || data.id,
-        name: data.name || data.user?.name || email.split('@')[0],
-        email: data.email || data.user?.email || email,
-        role: (data.role || data.user?.role || role) as User['role'],
-      };
-      persist(data.token, userObj);
-      return userObj;
-    } catch (err: any) {
-      // Fallback to /auth/login if role-specific endpoint is 404
-      if (err.response?.status === 404 && endpoint !== '/auth/login') {
-        const { data } = await api.post('/auth/login', { email, password });
-        const userObj: User = {
-          id: data.user?.id || data._id || data.id,
-          name: data.user?.name || data.name || email.split('@')[0],
-          email: data.user?.email || data.email || email,
-          role: (data.user?.role || data.role || role) as User['role'],
-        };
-        persist(data.token, userObj);
-        return userObj;
-      }
-      throw err;
-    }
+  useEffect(() => {
+    refreshUser();
   }, []);
 
-  const register = useCallback(async (name: string, email: string, password: string, role: string) => {
-    // Support register or signup endpoints
-    let data;
-    try {
-      const res = await api.post('/auth/register', { name, email, password, role });
-      data = res.data;
-    } catch (err: any) {
-      if (err.response?.status === 404) {
-        const res = await api.post('/auth/signup', { name, email, password, role });
-        data = res.data;
-      } else {
-        throw err;
-      }
+  const login = async (email: string, password: string, role?: string): Promise<User> => {
+    const { data } = await api.post('/auth/login', { email, password, role });
+    if (data.token) {
+      localStorage.setItem('eduflow_token', data.token);
     }
+    setUser(data.user);
+    return data.user;
+  };
 
-    const userObj: User = {
-      id: data._id || data.user?.id || data.id,
-      name: data.name || data.user?.name || name,
-      email: data.email || data.user?.email || email,
-      role: (data.role || data.user?.role || role) as User['role'],
-    };
-    persist(data.token, userObj);
-    return userObj;
-  }, []);
+  const register = async (name: string, email: string, password: string, role = 'student'): Promise<User> => {
+    const { data } = await api.post('/auth/register', { name, email, password, role });
+    if (data.token) {
+      localStorage.setItem('eduflow_token', data.token);
+    }
+    setUser(data.user);
+    return data.user;
+  };
 
-  const logout = useCallback(() => {
+  const logout = () => {
     localStorage.removeItem('eduflow_token');
-    localStorage.removeItem('eduflow_user');
     setUser(null);
-  }, []);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
-}
-
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

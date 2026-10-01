@@ -168,7 +168,16 @@ export async function processVideo(videoId) {
     video.summary = video.summary || `Educational video ${video.originalName} ready for viewing and study.`;
     video.topics = video.topics?.length ? video.topics : ['Educational Lecture'];
     video.importantTimestamps = video.importantTimestamps?.length ? video.importantTimestamps : [
-      { timestamp: '00:00', startTime: 0, endTime: 60, topic: 'Introduction', description: 'Start of video lecture' }
+      {
+        timestamp: '00:00',
+        startTime: 0,
+        endTime: 60,
+        clipStartTime: 0,
+        clipEndTime: 60,
+        clipDuration: 60,
+        topic: 'Introduction',
+        description: 'Start of video lecture'
+      }
     ];
     await video.save();
     return video;

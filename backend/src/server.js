@@ -17,3 +17,4 @@ main().catch((err) => {
   logger.error('Fatal startup error:', err);
   process.exit(1);
 });
+

@@ -123,8 +123,11 @@ export default function StudentDashboard() {
         </div>
       </div>
 
+      {/* Gamification Card */}
+      <GamificationCard user={user} />
+
       {/* Gamified Activity Matrix & Streak Calendar */}
-      <StreakCalendar streakCount={progress?.streakCount || (submissions.length > 0 ? 1 : 0)} submissions={submissions} />
+      <StreakCalendar streakCount={user?.streak || progress?.streakCount || (submissions.length > 0 ? 1 : 0)} submissions={submissions} />
 
       {/* Enrolled Classes section */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4">
@@ -221,6 +224,52 @@ export default function StudentDashboard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+export function GamificationCard({ user }: { user: any }) {
+  const currentXP = user?.xp || 0;
+  const currentLevel = user?.level || 1;
+  const streak = user?.streak || 0;
+
+  // XP Progress towards next level (150 XP per level)
+  const xpInCurrentLevel = currentXP % 150;
+  const progressPercent = Math.min(100, Math.round((xpInCurrentLevel / 150) * 100));
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg flex flex-col gap-4 text-white">
+      <div className="flex justify-between items-center">
+        <div>
+          <span className="text-xs font-semibold uppercase text-indigo-400 tracking-wide">
+            Rank & Progression
+          </span>
+          <h3 className="text-lg font-bold text-white">Level {currentLevel} Scholar</h3>
+        </div>
+        <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-3 py-1 rounded-full text-xs font-bold">
+          🔥 {streak} {streak === 1 ? 'Day' : 'Days'} Streak
+        </div>
+      </div>
+
+      {/* Level Progress Bar */}
+      <div>
+        <div className="flex justify-between text-xs text-slate-400 mb-1.5 font-medium">
+          <span>{xpInCurrentLevel} / 150 XP</span>
+          <span>{150 - xpInCurrentLevel} XP to Level {currentLevel + 1}</span>
+        </div>
+        <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden p-0.5 border border-slate-700/50">
+          <div
+            className="bg-gradient-to-r from-indigo-500 to-blue-500 h-full rounded-full transition-all duration-500 shadow-sm"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Actionable micro-milestone */}
+      <div className="text-xs text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-3">
+        <span>Completed Practice Nodes:</span>
+        <span className="font-bold text-slate-200">{user?.completedNodes?.length || 0}</span>
+      </div>
     </div>
   );
 }

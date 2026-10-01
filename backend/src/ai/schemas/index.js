@@ -85,11 +85,15 @@ export const videoUnderstandingSchema = z.object({
   concepts: z.array(z.string()).default([]),
   keyPoints: z.array(z.string()).default([]),
   importantTimestamps: z.array(z.object({
-    timestamp: z.string().default('00:00'),
+    timestamp: z.string().optional().default('00:00'),
     startTime: z.coerce.number().nullable().optional().default(0),
     endTime: z.coerce.number().nullable().optional().default(60),
-    topic: z.string().default('Key Moment'),
-    description: z.string().default('')
+    clipStartTime: z.coerce.number().nullable().optional(),
+    clipEndTime: z.coerce.number().nullable().optional(),
+    clipDuration: z.coerce.number().nullable().optional(),
+    topic: z.string().optional().default('Key Moment'),
+    description: z.string().optional().default(''),
+    conceptPrinciple: z.string().optional().default('')
   })).default([]),
   transcriptChunks: z.array(z.object({
     text: z.string().default('Video segment content'),

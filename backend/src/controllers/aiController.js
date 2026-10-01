@@ -8,6 +8,7 @@ import { getStudentContext } from '../ai/memory/studentMemory.js';
 import { masteryToLevel } from '../ai/agents/knowledgeProfileAgent.js';
 import QuizAttempt from '../models/QuizAttempt.js';
 import AIEvaluationLog from '../models/AIEvaluationLog.js';
+import { awardUserXP } from '../utils/gamification.js';
 
 export const getEvaluation = asyncHandler(async (req, res) => {
   const gradingResult = await GradingResult.findOne({ submission: req.params.submissionId });
@@ -16,19 +17,76 @@ export const getEvaluation = asyncHandler(async (req, res) => {
 });
 
 export const generateQuiz = asyncHandler(async (req, res) => {
-  const { targetConcept, misconception, context, count } = req.body;
-  const concept = targetConcept || 'Python Logic & Concepts';
+  const { targetConcept, misconception, context, count, difficulty } = req.body;
   
+  // Safely convert targetConcept and misconception to strings
+  let concept = 'Python Logic & Concepts';
+  if (typeof targetConcept === 'string' && targetConcept.trim()) {
+    concept = targetConcept.trim();
+  } else if (targetConcept && typeof targetConcept === 'object') {
+    concept = targetConcept.title || targetConcept.concept || targetConcept.name || 'General Concept Practice';
+  }
+
+  let miscText = 'N/A';
+  if (typeof misconception === 'string' && misconception.trim()) {
+    miscText = misconception.trim();
+  } else if (misconception && typeof misconception === 'object') {
+    miscText = misconception.detectedMisconception || misconception.message || 'N/A';
+  }
+
+  const diffLevel = typeof difficulty === 'string' ? difficulty : 'medium';
+  const studentId = req.user?._id;
+
+  if (studentId) {
+    try {
+      // 1. Check if student already completed a quiz for this targetConcept
+      const existingCompleted = await QuizAttempt.findOne({
+        student: studentId,
+        targetConcept: concept,
+        completedAt: { $ne: null }
+      }).sort({ updatedAt: -1 });
+
+      if (existingCompleted) {
+        return res.status(200).json({
+          quizAttempt: existingCompleted,
+          alreadyCompleted: true
+        });
+      }
+
+      // 2. Check if student has an active in-progress attempt for this targetConcept
+      const inProgress = await QuizAttempt.findOne({
+        student: studentId,
+        targetConcept: concept,
+        completedAt: null
+      }).sort({ updatedAt: -1 });
+
+      if (inProgress) {
+        return res.status(200).json({
+          quizAttempt: inProgress,
+          alreadyCompleted: false
+        });
+      }
+    } catch (dbFindErr) {
+      // Silently fall through to generate fresh quiz if lookup fails
+    }
+  }
+
   let questions = [];
   try {
-    const rawQuestions = await runQuizAgent({ targetConcept: concept, misconception, context, count });
+    const rawQuestions = await runQuizAgent({
+      targetConcept: concept,
+      misconception: miscText,
+      context: typeof context === 'string' ? context : JSON.stringify(context || {}),
+      count: count || 4,
+      difficulty: diffLevel
+    });
     if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
       questions = rawQuestions.map((q) => ({
         question: q.question || q.questionText || `Question about ${concept}`,
         options: Array.isArray(q.options) && q.options.length >= 2 ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
         correctAnswerIndex: typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : 0,
         explanation: q.explanation || `Key concept: ${concept}`,
-        difficulty: q.difficulty || 'medium',
+        difficulty: q.difficulty || diffLevel,
         targetConcept: concept
       }));
     }
@@ -48,7 +106,7 @@ export const generateQuiz = asyncHandler(async (req, res) => {
         ],
         correctAnswerIndex: 0,
         explanation: `${concept} requires proper logical flow and boundary condition handling.`,
-        difficulty: 'medium',
+        difficulty: diffLevel,
         targetConcept: concept
       },
       {
@@ -61,7 +119,7 @@ export const generateQuiz = asyncHandler(async (req, res) => {
         ],
         correctAnswerIndex: 0,
         explanation: `Modular functions and explicit filtering ensure reliable execution.`,
-        difficulty: 'medium',
+        difficulty: diffLevel,
         targetConcept: concept
       }
     ];
@@ -69,21 +127,22 @@ export const generateQuiz = asyncHandler(async (req, res) => {
 
   try {
     const attempt = await QuizAttempt.create({
-      student: req.user._id,
+      student: studentId,
       sourceType: 'remediation',
       targetConcept: concept,
       questions
     });
-    return res.status(201).json({ quizAttempt: attempt });
+    return res.status(201).json({ quizAttempt: attempt, alreadyCompleted: false });
   } catch (dbErr) {
     return res.status(201).json({
       quizAttempt: {
         _id: 'temp-' + Date.now(),
-        student: req.user._id,
+        student: studentId,
         sourceType: 'remediation',
         targetConcept: concept,
         questions
-      }
+      },
+      alreadyCompleted: false
     });
   }
 });
@@ -94,6 +153,11 @@ export const submitQuiz = asyncHandler(async (req, res) => {
   if (!attempt) throw new ApiError(404, 'Quiz attempt not found');
   if (String(attempt.student) !== String(req.user._id)) throw new ApiError(403, 'Not your quiz attempt');
 
+  // If already completed, return existing result without duplicate scoring or XP
+  if (attempt.completedAt) {
+    return res.json({ quizAttempt: attempt, alreadyCompleted: true });
+  }
+
   let correct = 0;
   attempt.questions.forEach((q, i) => {
     q.studentAnswerIndex = answers[i];
@@ -102,7 +166,11 @@ export const submitQuiz = asyncHandler(async (req, res) => {
   attempt.score = Math.round((correct / attempt.questions.length) * 100);
   attempt.completedAt = new Date();
   await attempt.save();
-  res.json({ quizAttempt: attempt });
+
+  // Award XP once per completed quiz attempt
+  await awardUserXP(req.user._id, 'PRACTICE_QUIZ', String(attempt._id));
+
+  res.json({ quizAttempt: attempt, alreadyCompleted: true });
 });
 
 export const generateRoadmap = asyncHandler(async (req, res) => {

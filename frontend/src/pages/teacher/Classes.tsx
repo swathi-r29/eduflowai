@@ -77,7 +77,7 @@ export default function Classes() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Classes</h1>
         <button className="btn-primary" onClick={() => setCreatingClass(true)}>New class</button>
@@ -96,7 +96,7 @@ export default function Classes() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {classes.map((c) => (
           <div key={c._id} className="card hover:border-brand-indigo/50 transition-colors">
             <div className="flex justify-between items-start">
@@ -113,7 +113,7 @@ export default function Classes() {
         ))}
       </div>
 
-      <div className="card">
+      <div className="card w-full">
         <h2 className="font-semibold mb-4">Create assignment with rubric</h2>
         <label className="label">Class</label>
         <select className="input-field mb-3" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}>

@@ -14,6 +14,7 @@ import SubmissionDetail from './pages/student/SubmissionDetail';
 import Workspaces from './pages/student/Workspaces';
 import WorkspaceDetail from './pages/student/WorkspaceDetail';
 import StudentProgress from './pages/student/Progress';
+import QuizPage from './pages/student/QuizPage';
 
 import TeacherDashboard from './pages/teacher/Dashboard';
 import TeacherClasses from './pages/teacher/Classes';
@@ -37,6 +38,7 @@ export default function App() {
       <Route path="/student" element={<ProtectedRoute roles={['student']}><StudentDashboard /></ProtectedRoute>} />
       <Route path="/student/assignments" element={<ProtectedRoute roles={['student']}><StudentAssignments /></ProtectedRoute>} />
       <Route path="/student/submissions/:id" element={<ProtectedRoute roles={['student']}><SubmissionDetail /></ProtectedRoute>} />
+      <Route path="/student/quiz" element={<ProtectedRoute roles={['student']}><QuizPage /></ProtectedRoute>} />
       <Route path="/student/workspaces" element={<ProtectedRoute roles={['student']}><Workspaces /></ProtectedRoute>} />
       <Route path="/student/workspaces/:id" element={<ProtectedRoute roles={['student']}><WorkspaceDetail /></ProtectedRoute>} />
       <Route path="/student/progress" element={<ProtectedRoute roles={['student']}><StudentProgress /></ProtectedRoute>} />

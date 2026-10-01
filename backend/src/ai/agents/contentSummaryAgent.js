@@ -14,8 +14,8 @@ export async function runContentSummaryAgent({ mode, context, extra }) {
     short_summary: 'Explain this source in exactly 5 concise bullet points.',
     notes: 'Create structured study notes (headings + bullets) from this source.',
     flashcards: 'Generate 8-12 flashcards (front/back) from this source, as a JSON array of {front, back}.',
-    quiz: 'Generate 5 multiple-choice or conceptual practice questions with detailed answers based on this source.',
-    practice_questions: 'Create a list of 5 conceptual & application practice questions to test understanding of this source material.',
+    quiz: 'Generate 5 multiple-choice practice questions strictly based on this source material. Return ONLY a JSON array of objects with schema: [{"question": string, "options": string[], "correctAnswerIndex": number, "explanation": string, "targetConcept": string}]. Do not include Markdown wrapper text.',
+    practice_questions: 'Generate 5 conceptual multiple-choice questions strictly based on this source material. Return ONLY a JSON array of objects with schema: [{"question": string, "options": string[], "correctAnswerIndex": number, "explanation": string, "targetConcept": string}]. Do not include Markdown wrapper text.',
     revision_plan: 'Create a short revision plan (ordered steps) based on this source.',
     key_concepts: 'List the most important concepts from this source, each with a one-line definition.'
   };

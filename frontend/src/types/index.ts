@@ -2,9 +2,14 @@ export type Role = 'student' | 'teacher' | 'admin';
 
 export interface User {
   id: string;
+  _id?: string;
   name: string;
   email: string;
   role: Role;
+  xp?: number;
+  level?: number;
+  streak?: number;
+  completedNodes?: string[];
 }
 
 export interface ClassItem {
@@ -132,7 +137,17 @@ export interface VideoItem {
   topics?: string[];
   concepts?: string[];
   keyPoints?: string[];
-  importantTimestamps?: { timestamp: string; startTime?: number; endTime?: number; topic: string; description: string }[];
+  importantTimestamps?: {
+    timestamp: string;
+    startTime?: number;
+    endTime?: number;
+    clipStartTime?: number;
+    clipEndTime?: number;
+    clipDuration?: number;
+    topic: string;
+    description: string;
+    conceptPrinciple?: string;
+  }[];
 }
 
 export interface TutorSource {

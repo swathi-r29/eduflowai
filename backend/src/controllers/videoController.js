@@ -63,7 +63,16 @@ export const addYoutubeVideo = asyncHandler(async (req, res) => {
     status: 'processing',
     summary: `Fetching and analyzing YouTube lecture ${videoName}...`,
     importantTimestamps: [
-      { timestamp: '00:00', startTime: 0, endTime: 60, topic: 'Introduction', description: 'Start of YouTube video lecture' }
+      {
+        timestamp: '00:00',
+        startTime: 0,
+        endTime: 60,
+        clipStartTime: 0,
+        clipEndTime: 60,
+        clipDuration: 60,
+        topic: 'Introduction',
+        description: 'Start of YouTube video lecture'
+      }
     ]
   });
 

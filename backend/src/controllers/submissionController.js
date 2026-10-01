@@ -11,7 +11,7 @@ import { parseHandwrittenOCR } from '../ai/agents/ocrAgent.js';
 import { runPreflightCheck } from '../ai/agents/preflightAgent.js';
 import { runConsistencyAudit, generateReTeachPlan } from '../ai/agents/analyticsEnhancementAgent.js';
 import { logger } from '../utils/logger.js';
-
+import { awardUserXP } from '../utils/gamification.js';
 
 /**
  * Normalizes text/code by stripping comments, non-alphanumeric chars, and duplicate whitespace
@@ -90,6 +90,11 @@ export const createSubmission = asyncHandler(async (req, res) => {
     .then(async () => {
       submission.status = 'ai_evaluated';
       await submission.save();
+
+      // Award XP for completing an assignment submission
+      if (submission.student) {
+        await awardUserXP(submission.student, 'ASSIGNMENT_SUBMISSION', String(assignment._id));
+      }
     })
     .catch(async (err) => {
       logger.error('Assessment pipeline failed:', err.message);
@@ -210,6 +215,11 @@ export const preflightCheck = asyncHandler(async (req, res) => {
     rubric: assignment.rubric || [],
     draftText: answerText
   });
+
+  // Award XP if student is logged in
+  if (req.user?._id) {
+    await awardUserXP(req.user._id, 'PREFLIGHT_CHECK');
+  }
 
   res.json({ preflight: preflightResult });
 });
@@ -478,4 +488,12 @@ export const calibrateGrading = asyncHandler(async (req, res) => {
   gradingResult.reviewedAt = new Date();
   await gradingResult.save();
   res.json({ gradingResult });
+});
+
+export const completeJourneyNode = asyncHandler(async (req, res) => {
+  const { nodeId } = req.body;
+  if (!nodeId) throw new ApiError(400, 'nodeId is required');
+
+  const updatedUser = await awardUserXP(req.user._id, 'PRACTICE_QUIZ', nodeId);
+  res.json({ success: true, user: updatedUser });
 });

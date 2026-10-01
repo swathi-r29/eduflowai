@@ -6,8 +6,7 @@ export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   mongodbUri:
-    process.env.MONGODB_URI ||
-    'mongodb+srv://swathi29rd_db_user:eaUvTwAXcEoliatR@eduflow.bakocbc.mongodb.net/eduflow-ai?retryWrites=true&w=majority',
+    process.env.MONGODB_URI || 'mongodb://localhost:27017/eduflow-ai',
   redisUrl: process.env.REDIS_URL || '',
   redisHost: process.env.REDIS_HOST || '127.0.0.1',
   redisPort: Number(process.env.REDIS_PORT || 6379),

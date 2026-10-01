@@ -9,6 +9,7 @@ import { runStudyTutorAgent } from '../ai/agents/studyTutorAgent.js';
 import { runContentSummaryAgent } from '../ai/agents/contentSummaryAgent.js';
 import { search } from '../ai/retrieval/vectorStore.js';
 import { recordActivity } from '../ai/memory/studentMemory.js';
+import { awardUserXP } from '../utils/gamification.js';
 import mongoose from 'mongoose';
 
 /**
@@ -100,8 +101,8 @@ export const generateStudyContent = asyncHandler(async (req, res) => {
       const vid = await Video.findById(targetId);
       if (vid && vid.youtubeUrl) {
         try {
-          const { fetchTranscript } = await import('youtube-transcript');
-          const rawTrans = await fetchTranscript(vid.youtubeUrl);
+          const { YoutubeTranscript } = await import('youtube-transcript');
+          const rawTrans = await YoutubeTranscript.fetchTranscript(vid.youtubeUrl);
           if (rawTrans && rawTrans.length > 0) {
             const fmt = (sec) => {
               const m = Math.floor(sec / 60);
@@ -229,6 +230,11 @@ export const reviewFlashcard = asyncHandler(async (req, res) => {
   card.lastReviewed = new Date();
 
   await ws.save();
+
+  // Award XP for active practice recall
+  if (req.user?._id) {
+    await awardUserXP(req.user._id, 'PRACTICE_QUIZ', String(cardId));
+  }
 
   res.json({
     message: 'Card reviewed successfully',

@@ -1,10 +1,13 @@
 import fs from 'fs';
-import { fetchTranscript } from 'youtube-transcript';
+import { YoutubeTranscript } from 'youtube-transcript';
 import { getVideoProvider } from '../providers/providerFactory.js';
 import { parseAndValidate } from '../evaluators/outputValidator.js';
 import { videoUnderstandingSchema } from '../schemas/index.js';
 import { logAICall } from '../evaluators/aiLogger.js';
-
+function extractYouTubeId(url = '') {
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  return match ? match[1] : url.trim();
+}
 const SYSTEM = `You are an educational video analysis engine.
 
 You will receive a REAL timestamped transcript from an educational video.
@@ -76,37 +79,39 @@ function chunkTranscript(transcript, maxSeconds = 60) {
  */
 function normalizeMicroClips(importantTimestamps = [], maxVideoDuration = 3600) {
   return importantTimestamps.map((item) => {
-    const rawStart = Number(item.startTime ?? 0);
-    const rawEnd = Number(item.endTime ?? rawStart + 45);
+    const rawStart = Number(item.clipStartTime ?? item.startTime ?? item.start ?? 0);
+    const rawEnd = Number(item.clipEndTime ?? item.endTime ?? item.end ?? rawStart + 45);
 
-    // Compute bounded 30 to 60 second micro-clip window
-    let clipStart = Math.max(0, Math.floor(rawStart - 5));
-    let clipEnd = Math.max(clipStart + 30, Math.floor(rawEnd));
+    let clipStart = Number(item.clipStartTime ?? Math.max(0, Math.floor(rawStart - 5)));
+    let clipEnd = Number(item.clipEndTime ?? Math.max(clipStart + 30, Math.floor(rawEnd)));
     if (clipEnd - clipStart > 60) {
       clipEnd = clipStart + 60;
     }
 
+    const topic = item.topic || item.title || 'Core Concept';
     const principle =
       item.conceptPrinciple ||
       item.description ||
-      `This section demonstrates ${item.topic}. Focus on how this principle applies to solving the problem.`;
+      item.summary ||
+      `This section demonstrates ${topic}. Focus on how this principle applies to solving the problem.`;
 
     return {
       timestamp: item.timestamp || secondsToTimestamp(clipStart),
-      startTime: rawStart,
-      endTime: rawEnd,
+      startTime: Number(item.startTime ?? rawStart),
+      endTime: Number(item.endTime ?? rawEnd),
       clipStartTime: clipStart,
       clipEndTime: clipEnd,
       clipDuration: clipEnd - clipStart,
-      topic: item.topic || 'Core Concept',
-      description: item.description || '',
+      topic,
+      description: item.description || item.summary || '',
       conceptPrinciple: principle
     };
   });
 }
 
 async function processYouTubeTranscript({ youtubeUrl, videoTitle, provider, start }) {
-  const transcript = await fetchTranscript(youtubeUrl);
+  const videoId = extractYouTubeId(youtubeUrl);
+  const transcript = await YoutubeTranscript.fetchTranscript(videoId);
 
   if (!Array.isArray(transcript) || transcript.length === 0) {
     throw new Error('No YouTube transcript/captions were found for this video.');

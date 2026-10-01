@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import type { Workspace, DocumentItem, VideoItem, TutorSource } from '../../types';
 import VideoPlayer, { VideoPlayerRef } from '../../components/common/VideoPlayer';
 import FlashcardViewer, { Flashcard } from '../../components/common/FlashcardViewer';
+import InteractiveQuizViewer from '../../components/common/InteractiveQuizViewer';
 import { parseTimestampToSeconds, formatSecondsToTimestamp } from '../../utils/timestampUtils';
 import { UploadCloud, FileText, Video as VideoIcon, Send, Sparkles, Clock, Play, Youtube, Link as LinkIcon, Maximize2, Copy, Check } from 'lucide-react';
 import MarkdownRenderer from '../../components/common/MarkdownRenderer';
@@ -424,6 +425,14 @@ export default function WorkspaceDetail() {
             {/* Generated Flashcards View */}
             {contentMode === 'flashcards' && parsedFlashcards.length > 0 ? (
               <FlashcardViewer cards={parsedFlashcards} onRegenerate={generate} isGenerating={generating} />
+            ) : (contentMode === 'quiz' || contentMode === 'practice_questions') && generatedContent ? (
+              <div className="bg-base-800 p-4 rounded-lg border border-base-700 space-y-3">
+                <InteractiveQuizViewer
+                  rawContent={generatedContent}
+                  title={`Interactive ${contentMode === 'quiz' ? 'Practice Quiz' : 'Practice Questions'}`}
+                  onRetake={generate}
+                />
+              </div>
             ) : generatedContent ? (
               <div className="bg-base-800 p-4 rounded-lg border border-base-700 space-y-3">
                 <div className="flex items-center justify-between border-b border-base-700 pb-2">
@@ -536,7 +545,15 @@ export default function WorkspaceDetail() {
               </div>
             </div>
             <div className="p-6 overflow-y-auto flex-1 text-sm text-slate-100 leading-relaxed font-sans select-text">
-              <MarkdownRenderer content={generatedContent} />
+              {contentMode === 'quiz' || contentMode === 'practice_questions' ? (
+                <InteractiveQuizViewer
+                  rawContent={generatedContent}
+                  title={`Interactive ${contentMode === 'quiz' ? 'Practice Quiz' : 'Practice Questions'}`}
+                  onRetake={generate}
+                />
+              ) : (
+                <MarkdownRenderer content={generatedContent} />
+              )}
             </div>
           </div>
         </div>

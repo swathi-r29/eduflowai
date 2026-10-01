@@ -2,15 +2,15 @@ import mongoose from 'mongoose';
 
 const importantTimestampSchema = new mongoose.Schema(
   {
-    timestamp: { type: String, required: true },
-    startTime: { type: Number, required: true },
-    endTime: { type: Number, required: true },
-    topic: { type: String, required: true },
+    timestamp: { type: String, default: '00:00' },
+    startTime: { type: Number, default: 0 },
+    endTime: { type: Number, default: 60 },
+    topic: { type: String, default: 'Key Moment' },
     description: { type: String, default: '' },
     // Micro-clip fields (30-60s looping snippet)
-    clipStartTime: { type: Number, required: true },
-    clipEndTime: { type: Number, required: true },
-    clipDuration: { type: Number, default: 45 },
+    clipStartTime: { type: Number, default: 0 },
+    clipEndTime: { type: Number, default: 60 },
+    clipDuration: { type: Number, default: 60 },
     conceptPrinciple: { type: String, default: '' } // 2-sentence explanation of concept taught in this clip
   },
   { _id: false }

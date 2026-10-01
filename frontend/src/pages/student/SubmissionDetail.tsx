@@ -1,13 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import type { Submission, GradingResult, Assignment } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import JourneyTree, { JourneyNodeItem } from '../../components/common/JourneyTree';
 import QuizPanel from '../../components/common/QuizPanel';
+import QuizModal from '../../components/common/QuizModal';
 import AIVoiceTutor from '../../components/common/AIVoiceTutor';
 import { formatSecondsToTimestamp } from '../../utils/timestampUtils';
 import { Sparkles, Video, FileText, ExternalLink, Award, CheckCircle2, XCircle, Code, Terminal, Cpu } from 'lucide-react';
 
 export default function SubmissionDetail() {
+  const navigate = useNavigate();
+  const { user, refreshUser } = useAuth();
   const { id } = useParams();
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [grading, setGrading] = useState<GradingResult | null>(null);
@@ -30,6 +35,124 @@ export default function SubmissionDetail() {
   }, [id]);
 
   const assignment = submission?.assignment as Assignment | undefined;
+  const [selectedNode, setSelectedNode] = useState<JourneyNodeItem | null>(null);
+  const [completingNode, setCompletingNode] = useState(false);
+  const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
+
+  const handleSelectNode = (node: JourneyNodeItem) => {
+    const params = new URLSearchParams({
+      concept: node.concept || node.title || '',
+      title: node.title || '',
+      difficulty: node.difficulty || 'medium',
+      nodeId: node.id || '',
+      type: node.type || '',
+      misconception: grading?.rootCause?.detectedMisconception || '',
+      returnUrl: `/student/submissions/${id}`
+    });
+    navigate(`/student/quiz?${params.toString()}`);
+  };
+
+  const submissionRevisionPlan = React.useMemo(() => {
+    if (!grading) return null;
+    const primaryConcept = grading.rootCause?.expectedConcept ||
+      (grading.understanding?.missingConcepts && grading.understanding.missingConcepts[0]) ||
+      'Core Programming Logic & Syntax';
+
+    const detectedMisconception = grading.rootCause?.detectedMisconception ||
+      'Syntax boundary conditions, variable state, and runtime output prediction.';
+
+    const items: JourneyNodeItem[] = [
+      {
+        id: 'node-step-1',
+        type: 'Node 1 • Easy',
+        title: `1. Basic Rules & Definitions`,
+        concept: `${primaryConcept}: Core Rules`,
+        description: `Start here! Review basic definitions, rules, and fundamental concepts of ${primaryConcept}.`,
+        remediationFocus: 'Basic recognition & rules',
+        difficulty: 'easy',
+        completed: (user?.completedNodes || []).includes('node-step-1')
+      },
+      {
+        id: 'node-step-2',
+        type: 'Node 2 • Easy',
+        title: `2. Concept Distinctions & Syntax`,
+        concept: `${primaryConcept}: Key Distinctions`,
+        description: `Understand parameter matching, signature rules, and structural distinctions.`,
+        remediationFocus: 'Concept distinctions & parameter rules',
+        difficulty: 'easy',
+        completed: (user?.completedNodes || []).includes('node-step-2')
+      },
+      {
+        id: 'node-step-3',
+        type: 'Node 3 • Medium',
+        title: `3. Applied Code Tracing`,
+        concept: `${primaryConcept}: Code Execution`,
+        description: `Analyze sample code snippets, trace variable states, and predict exact outputs.`,
+        remediationFocus: 'Code tracing & output prediction',
+        difficulty: 'medium',
+        completed: (user?.completedNodes || []).includes('node-step-3')
+      },
+      {
+        id: 'node-step-4',
+        type: 'Node 4 • Hard',
+        title: `4. Pitfalls & Misconceptions`,
+        concept: `${primaryConcept}: Edge Cases`,
+        description: `Address detected issue: "${detectedMisconception}". Uncover subtle bugs.`,
+        remediationFocus: 'Pitfalls & edge-case bugs',
+        difficulty: 'hard',
+        completed: (user?.completedNodes || []).includes('node-step-4')
+      },
+      {
+        id: 'node-step-5',
+        type: 'Node 5 • Hard',
+        title: `5. Dynamic Dispatch & Runtime`,
+        concept: `${primaryConcept}: Runtime Mechanics`,
+        description: `Master runtime resolution, late binding, and dynamic execution behavior.`,
+        remediationFocus: 'Runtime resolution & dynamic dispatch',
+        difficulty: 'hard',
+        completed: (user?.completedNodes || []).includes('node-step-5')
+      },
+      {
+        id: 'node-step-6',
+        type: 'Node 6 • Expert Mastery',
+        title: `6. Production Refactoring Challenge`,
+        concept: `${primaryConcept}: Expert Refactoring`,
+        description: `Refactor production code snippets for optimal efficiency, clarity, and robust logic.`,
+        remediationFocus: 'Expert refactoring & synthesis',
+        difficulty: 'expert',
+        completed: (user?.completedNodes || []).includes('node-step-6')
+      }
+    ];
+
+    return { actionItems: items };
+  }, [grading, user?.completedNodes]);
+
+  useEffect(() => {
+    if (submissionRevisionPlan?.actionItems?.length && !selectedNode) {
+      setSelectedNode(submissionRevisionPlan.actionItems[0]);
+    }
+  }, [submissionRevisionPlan]);
+
+  const handleCompleteNode = async (nodeId: string) => {
+    if (!nodeId) return;
+    setCompletingNode(true);
+    try {
+      await api.post('/submissions/journey/complete-node', { nodeId });
+      await refreshUser();
+      if (submissionRevisionPlan?.actionItems) {
+        const currentIdx = submissionRevisionPlan.actionItems.findIndex((n) => n.id === nodeId);
+        if (currentIdx !== -1 && currentIdx + 1 < submissionRevisionPlan.actionItems.length) {
+          setSelectedNode(submissionRevisionPlan.actionItems[currentIdx + 1]);
+        } else if (selectedNode) {
+          setSelectedNode({ ...selectedNode, completed: true });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to complete journey node:', err);
+    } finally {
+      setCompletingNode(false);
+    }
+  };
 
   if (!submission) return <p className="text-slate-500 p-6">Loading submission details...</p>;
 
@@ -57,7 +180,7 @@ export default function SubmissionDetail() {
   const isExecutionApplicable = exec?.applicable !== false && exec?.status !== 'NOT_APPLICABLE' && evalType === 'PROGRAMMING';
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="w-full space-y-6">
       {/* Header score card */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm border-l-4 border-l-blue-600">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -318,13 +441,42 @@ export default function SubmissionDetail() {
         </div>
       </div>
 
-      {/* Targeted Quiz Remediation */}
-      {(grading.understanding?.missingConcepts?.length > 0 || failedTests.length > 0) && (
-        <QuizPanel
-          targetConcept={grading.rootCause?.expectedConcept || 'Boundary Condition Handling'}
-          misconception={grading.rootCause?.detectedMisconception}
-          context={grading.rootCause?.rootReason}
-        />
+      {/* Coddy-style Interactive Journey & Skill Tree Remediation */}
+      {submissionRevisionPlan && submissionRevisionPlan.actionItems && submissionRevisionPlan.actionItems.length > 0 && (
+        <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6 text-white">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-800 pb-4">
+            <div>
+              <span className="text-xs uppercase tracking-widest text-indigo-400 font-bold">Interactive Learning Path</span>
+              <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-400" /> Coddy-style Revision Skill Tree
+              </h2>
+            </div>
+            <span className="text-xs bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 px-3 py-1 rounded-full font-mono font-bold">
+              +50 XP per Node Completed
+            </span>
+          </div>
+
+          <div className="max-w-xl mx-auto bg-slate-900/60 p-6 rounded-3xl border border-slate-800/80 shadow-2xl flex flex-col items-center justify-center">
+            <JourneyTree
+              revisionPlan={submissionRevisionPlan}
+              activeNodeId={selectedNode?.id}
+              completedNodeIds={user?.completedNodes || []}
+              onSelectNode={handleSelectNode}
+            />
+          </div>
+
+          {/* Dedicated Quiz Modal Overlay */}
+          <QuizModal
+            isOpen={isQuizModalOpen}
+            onClose={() => setIsQuizModalOpen(false)}
+            node={selectedNode}
+            misconception={grading?.rootCause?.detectedMisconception}
+            context={grading?.rootCause?.rootReason}
+            onQuizComplete={() => {
+              if (selectedNode) handleCompleteNode(selectedNode.id);
+            }}
+          />
+        </div>
       )}
     </div>
   );
