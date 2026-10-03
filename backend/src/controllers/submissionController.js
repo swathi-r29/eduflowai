@@ -410,14 +410,22 @@ export const getSubmission = asyncHandler(async (req, res) => {
   const submission = await Submission.findById(req.params.id).populate('assignment');
   if (!submission) throw new ApiError(404, 'Submission not found');
 
-  if (req.user?.role === 'student' && String(submission.student) !== String(req.user._id)) {
+  if (req.user?.role === 'student' && submission.student && String(submission.student) !== String(req.user._id)) {
     throw new ApiError(403, 'Forbidden: You can only view your own submission');
   }
 
   if (req.user?.role === 'teacher') {
-    const cls = await ClassModel.findById(submission.assignment.class);
-    if (!cls || String(cls.teacher) !== String(req.user._id)) {
-      throw new ApiError(403, 'Forbidden: You can only view submissions for your own class');
+    const assignment = submission.assignment;
+    const isDirectTeacher = assignment && String(assignment.teacher) === String(req.user._id);
+    let isClassTeacher = false;
+    if (assignment?.class) {
+      const cls = await ClassModel.findById(assignment.class);
+      if (cls && String(cls.teacher) === String(req.user._id)) {
+        isClassTeacher = true;
+      }
+    }
+    if (!isDirectTeacher && !isClassTeacher) {
+      throw new ApiError(403, 'Forbidden: You can only view submissions for your own class or assignments');
     }
   }
 
@@ -435,10 +443,18 @@ export const listSubmissions = asyncHandler(async (req, res) => {
   if (req.user?.role === 'teacher') {
     const teacherClasses = await ClassModel.find({ teacher: req.user._id }).select('_id');
     const classIds = teacherClasses.map((c) => c._id);
-    const teacherAssignments = await Assignment.find({ class: { $in: classIds } }).select('_id');
+    const teacherAssignments = await Assignment.find({
+      $or: [{ teacher: req.user._id }, { class: { $in: classIds } }]
+    }).select('_id');
     const assignmentIds = teacherAssignments.map((a) => a._id);
+
     if (filter.assignment) {
-      if (!assignmentIds.some((id) => String(id) === String(filter.assignment))) {
+      const targetAssignment = await Assignment.findById(filter.assignment);
+      const isOwner = targetAssignment && (
+        String(targetAssignment.teacher) === String(req.user._id) ||
+        classIds.some((cid) => String(cid) === String(targetAssignment.class))
+      );
+      if (!isOwner) {
         return res.json({ submissions: [] });
       }
     } else {
@@ -447,7 +463,8 @@ export const listSubmissions = asyncHandler(async (req, res) => {
   }
 
   const submissions = await Submission.find(filter)
-    .populate('assignment', 'title maxScore')
+    .populate('assignment', 'title maxScore evaluationType')
+    .populate('student', 'name email')
     .sort({ createdAt: -1 });
 
   res.json({ submissions });
@@ -460,9 +477,17 @@ export const calibrateGrading = asyncHandler(async (req, res) => {
   if (!gradingResult) throw new ApiError(404, 'Grading result not found');
 
   if (req.user?.role === 'teacher') {
-    const cls = await ClassModel.findById(gradingResult.assignment.class);
-    if (!cls || String(cls.teacher) !== String(req.user._id)) {
-      throw new ApiError(403, 'Forbidden: You can only calibrate grading for your own class');
+    const assignment = gradingResult.assignment;
+    const isDirectTeacher = assignment && String(assignment.teacher) === String(req.user._id);
+    let isClassTeacher = false;
+    if (assignment?.class) {
+      const cls = await ClassModel.findById(assignment.class);
+      if (cls && String(cls.teacher) === String(req.user._id)) {
+        isClassTeacher = true;
+      }
+    }
+    if (!isDirectTeacher && !isClassTeacher) {
+      throw new ApiError(403, 'Forbidden: You can only calibrate grading for your own class or assignments');
     }
   } else if (req.user?.role !== 'admin') {
     throw new ApiError(403, 'Forbidden');

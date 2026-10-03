@@ -37,6 +37,7 @@ export default function App() {
 
       <Route path="/student" element={<ProtectedRoute roles={['student']}><StudentDashboard /></ProtectedRoute>} />
       <Route path="/student/assignments" element={<ProtectedRoute roles={['student']}><StudentAssignments /></ProtectedRoute>} />
+      <Route path="/student/assignments/:assignmentId/submit" element={<ProtectedRoute roles={['student']}><PublicSubmission /></ProtectedRoute>} />
       <Route path="/student/submissions/:id" element={<ProtectedRoute roles={['student']}><SubmissionDetail /></ProtectedRoute>} />
       <Route path="/student/quiz" element={<ProtectedRoute roles={['student']}><QuizPage /></ProtectedRoute>} />
       <Route path="/student/workspaces" element={<ProtectedRoute roles={['student']}><Workspaces /></ProtectedRoute>} />

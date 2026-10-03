@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { api } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { VoiceInputButton } from '../../components/common/VoiceInputButton';
 import { Sparkles, Camera, CheckCircle2, AlertCircle, FileText, Send, Loader2 } from 'lucide-react';
 
 export const PublicSubmission: React.FC = () => {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [assignment, setAssignment] = useState<any>(null);
   const [loadingAssignment, setLoadingAssignment] = useState(true);
@@ -24,6 +27,12 @@ export const PublicSubmission: React.FC = () => {
   // Submission state
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user?.name) {
+      setStudentName(user.name);
+    }
+  }, [user]);
 
   useEffect(() => {
     async function fetchAssignment() {
@@ -88,23 +97,35 @@ export const PublicSubmission: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!answerText.trim() || (!studentName.trim() && !rollNumber.trim())) {
-      alert('Please fill in your name/roll number and answer text.');
+    if (!answerText.trim()) {
+      alert('Please enter your answer text.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const res = await axios.post(`/api/submissions/public/${assignmentId}`, {
-        studentName,
-        rollNumber,
-        answerText
-      });
-
-      setSubmittedId(res.data.submission._id);
-    } catch (err) {
-      console.error('Public submission failed:', err);
-      alert('Failed to submit assignment. Please try again.');
+      if (user && user.role === 'student') {
+        const res = await api.post('/submissions', {
+          assignmentId,
+          answerText
+        });
+        setSubmittedId(res.data.submission._id);
+      } else {
+        if (!studentName.trim() && !rollNumber.trim()) {
+          alert('Please fill in your name or roll number.');
+          setSubmitting(false);
+          return;
+        }
+        const res = await axios.post(`/api/submissions/public/${assignmentId}`, {
+          studentName,
+          rollNumber,
+          answerText
+        });
+        setSubmittedId(res.data.submission._id);
+      }
+    } catch (err: any) {
+      console.error('Submission failed:', err);
+      alert(err.response?.data?.message || 'Failed to submit assignment. Please try again.');
     } finally {
       setSubmitting(false);
     }
